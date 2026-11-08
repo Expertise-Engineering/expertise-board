@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { addCommentAction, deleteTaskAction, loadThreadAction, patchTaskAction, updateTaskAction } from "@/actions/board";
 import { useBoard } from "@/components/shell/board-context";
 import { STATUS_META, STATUS_ORDER } from "@/lib/board/constants";
-import { waitingOn } from "@/lib/board/filters";
+import { sameProjectTasks, waitingOn } from "@/lib/board/filters";
 import { assigneeValue, formatStamp } from "@/lib/board/text";
 import type { Comment, Status, Task, TaskDependency, TaskEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -154,7 +154,7 @@ function TaskForm({
     });
   }
 
-  const others = tasks.filter((item) => item.id !== task.id);
+  const others = sameProjectTasks(task, tasks);
 
   return (
     <div className="flex flex-col gap-5 p-1">

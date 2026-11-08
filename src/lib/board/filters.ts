@@ -16,7 +16,7 @@ export const EMPTY_FILTERS: TaskFilters = {
   assignee: "all",
 };
 
-export function taskMatches(task: Task, filters: TaskFilters): boolean {
+export function taskMatches(task: Task, filters: TaskFilters, projectName = ""): boolean {
   if (filters.status !== "all" && task.status !== filters.status) return false;
   if (filters.tag !== "all" && !task.tags.includes(filters.tag)) return false;
   if (filters.human === "human" && !task.is_human) return false;
@@ -32,10 +32,17 @@ export function taskMatches(task: Task, filters: TaskFilters): boolean {
   }
   const query = filters.query.trim().toLowerCase();
   if (query) {
-    const haystack = `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLowerCase();
+    const haystack = `${task.title}\n${task.description}\n${task.tags.join(" ")}\n${projectName}`.toLowerCase();
     if (!haystack.includes(query)) return false;
   }
   return true;
+}
+
+export function sameProjectTasks<T extends Pick<Task, "id" | "project_id">>(
+  task: Pick<Task, "id" | "project_id">,
+  tasks: T[],
+): T[] {
+  return tasks.filter((item) => item.id !== task.id && item.project_id === task.project_id);
 }
 
 export function isWaiting(

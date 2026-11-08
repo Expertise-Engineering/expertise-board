@@ -2,7 +2,7 @@
 
 Internal kanban for [Expertise Engineering](https://github.com/Expertise-Engineering). One shared board for about fifteen engineers and the agents working beside them. The point is to see who is doing what, not to wall projects off from each other.
 
-A project is one customer or one job. Tasks sit in **Backlog**, **Todo**, **Doing**, **Review**, or **Done**. People park work in Backlog. Agents do not claim Backlog cards, cards marked human, or cards still waiting on unfinished work in the same project.
+**All projects** shows every customer on one board. A project is one customer or one job. Tasks sit in **Backlog**, **Todo**, **Doing**, **Review**, or **Done**. People park work in Backlog. Agents do not claim Backlog cards, cards marked human, or cards still waiting on unfinished work in the same project.
 
 This is an original app. It is not a copy of Kanzo.
 
@@ -86,7 +86,9 @@ The domain is checked in three places: the login form, the sign-in confirmation 
 
 Everyone who is signed in can see and edit the whole board. Click your name in the sidebar to change the display name.
 
-On a project board, press `N` to add a task. Click or tap a card to edit it. With a mouse, drag a card between columns. On a phone, drag the Move handle on the left of the card — a finger drag on the card itself scrolls the board. Changing Column inside the card moves it too. Realtime updates the board when tasks, comments, projects, or activity change.
+**All projects** (`/`) is where you land. It is one board of every customer's tasks, in the same columns, with the same filters — including Assignee, so one person or agent can be seen across every customer. Leave Assignee on Anyone to see the whole company. Each card names its customer. Moving a card changes its column and leaves it on that project. A new task asks which project it belongs to. The sidebar also opens any single project.
+
+On a board, press `N` to add a task. Click or tap a card to edit it. With a mouse, drag a card between columns. On a phone, drag the Move handle on the left of the card — a finger drag on the card itself scrolls the board. Changing Column inside the card moves it too. Realtime updates the board when tasks, comments, projects, or activity change.
 
 ## Agents and MCP
 

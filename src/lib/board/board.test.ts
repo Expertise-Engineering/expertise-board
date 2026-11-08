@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isWaiting, taskMatches } from "./filters.ts";
-import { nextPosition } from "./order.ts";
+import { isWaiting, sameProjectTasks, taskMatches } from "./filters.ts";
+import { nextPosition, placeTask } from "./order.ts";
 import { normalizeTags, slugify, uniqueSlug } from "./text.ts";
 import type { Task } from "../types.ts";
 
@@ -58,6 +58,48 @@ test("filters combine status, human, assignee, tag, and text", () => {
     true,
   );
   assert.equal(taskMatches(task(), { query: "missing", status: "all", tag: "all", human: "agent", assignee: "unassigned" }), false);
+});
+
+test("assignee filter spans projects, and search can name the customer", () => {
+  const cory = "44444444-4444-4444-8444-444444444444";
+  const acme = task({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    title: "Wire the intake form",
+    assignee_user_id: cory,
+  });
+  const northwind = task({
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    project_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    title: "Fix the invoice",
+    assignee_user_id: cory,
+    tags: [],
+  });
+  const other = task({
+    id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    title: "Call the buyer",
+    assignee_user_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+  });
+  const filters = { query: "", status: "all" as const, tag: "all", human: "all" as const, assignee: `user:${cory}` };
+  assert.equal(taskMatches(acme, filters), true);
+  assert.equal(taskMatches(northwind, filters), true);
+  assert.equal(taskMatches(other, filters), false);
+  assert.equal(taskMatches(northwind, { ...filters, assignee: "all", query: "northwind" }, "Northwind"), true);
+  assert.equal(taskMatches(northwind, { ...filters, assignee: "all", query: "northwind" }), false);
+  assert.deepEqual(
+    sameProjectTasks(acme, [acme, northwind, other]).map((item) => item.id),
+    [other.id],
+  );
+});
+
+test("moving a card keeps its project", () => {
+  const original = task({ project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", status: "todo", position: 1024 });
+  const moved = placeTask(original, "doing", 2048);
+  assert.equal(moved.status, "doing");
+  assert.equal(moved.position, 2048);
+  assert.equal(moved.project_id, original.project_id);
+  assert.equal(moved.id, original.id);
 });
 
 test("waiting ignores finished blockers", () => {

@@ -1,3 +1,11 @@
+export function placeTask<T extends { status: string; position: number }>(
+  task: T,
+  status: T["status"],
+  position: number,
+): T {
+  return { ...task, status, position };
+}
+
 export function nextPosition(
   column: { id: string; position: number }[],
   beforeId: string | null,

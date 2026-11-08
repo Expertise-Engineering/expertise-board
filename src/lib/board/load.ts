@@ -47,6 +47,18 @@ export const loadDirectory = cache(async (userId: string) => {
   };
 });
 
+export async function loadCompanyBoard() {
+  const supabase = await createClient();
+  const [taskResult, dependencyResult] = await Promise.all([
+    supabase.from("tasks").select("*").order("position", { ascending: true }),
+    supabase.from("task_dependencies").select("task_id, waits_on_task_id"),
+  ]);
+  return {
+    tasks: unwrap(taskResult, []) as Task[],
+    dependencies: unwrap(dependencyResult, []) as TaskDependency[],
+  };
+}
+
 export async function loadProjectBoard(slug: string) {
   const supabase = await createClient();
   const projectResult = await supabase

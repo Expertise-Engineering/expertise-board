@@ -21,7 +21,7 @@ import { useBoard } from "@/components/shell/board-context";
 import { STATUS_META, STATUS_ORDER } from "@/lib/board/constants";
 import { CARD_DRAG_DISTANCE_PX, createDragClickGate } from "@/lib/board/gestures";
 import { EMPTY_FILTERS, isWaiting, taskMatches, type TaskFilters } from "@/lib/board/filters";
-import { nextPosition } from "@/lib/board/order";
+import { nextPosition, placeTask } from "@/lib/board/order";
 import { assigneeValue, isStatus } from "@/lib/board/text";
 import type { Project, Status, Task, TaskDependency } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 const controlClass =
-  "h-9 rounded-lg border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-11 rounded-lg border border-input bg-card px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-sm";
 
 const rails: Record<Status, string> = {
   backlog: "border-l-stone-400",
@@ -55,12 +55,13 @@ export function Board({
   initialTasks,
   initialDependencies,
 }: {
-  project: Project;
+  project: Project | null;
   initialTasks: Task[];
   initialDependencies: TaskDependency[];
 }) {
   const router = useRouter();
-  const { profiles, agents } = useBoard();
+  const { profiles, agents, projects: directoryProjects } = useBoard();
+  const allProjects = project === null;
   const [tasks, setTasks] = useState(initialTasks);
   const [dependencies, setDependencies] = useState(initialDependencies);
   const [taskSource, setTaskSource] = useState(initialTasks);
@@ -107,7 +108,18 @@ export function Board({
     return [...values].sort();
   }, [tasks]);
 
-  const visible = tasks.filter((task) => taskMatches(task, filters));
+  const projectChoices = useMemo(
+    () => (project === null ? directoryProjects : [project]),
+    [project, directoryProjects],
+  );
+  const projectById = useMemo(() => {
+    const values = new Map<string, Project>();
+    for (const item of projectChoices) values.set(item.id, item);
+    return values;
+  }, [projectChoices]);
+  const visible = tasks.filter((task) =>
+    taskMatches(task, filters, allProjects ? projectById.get(task.project_id)?.name ?? "" : ""),
+  );
   const openTask = tasks.find((task) => task.id === openTaskId) ?? null;
   const columns = filters.status === "all" ? STATUS_ORDER : [filters.status];
 
@@ -150,7 +162,7 @@ export function Board({
     const position = nextPosition(column, beforeId);
     if (status === task.status && Math.abs(position - task.position) < 0.001) return;
 
-    setTasks((current) => current.map((item) => (item.id === task.id ? { ...item, status, position } : item)));
+    setTasks((current) => current.map((item) => (item.id === task.id ? placeTask(item, status, position) : item)));
     void patchTaskAction({ id: task.id, status, position }).then((result) => {
       if (!result.ok) {
         toast.error(result.error);
@@ -166,18 +178,22 @@ export function Board({
       <div className="border-b bg-card/70 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="truncate text-3xl font-medium tracking-tight">{project.name}</h1>
+            <h1 className="truncate text-3xl font-medium tracking-tight">{allProjects ? "All projects" : project.name}</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              {project.description || "Add a short description so the team knows which customer this is."}
+              {allProjects
+                ? "Every customer's tasks. Filter by assignee to see one person's work across all of them."
+                : project.description || "Add a short description so the team knows which customer this is."}
             </p>
             <p className="board-touch-hint mt-2 max-w-2xl text-sm leading-5 text-muted-foreground">
               Tap a card to edit it. Drag the Move handle to another column, or change Column inside the card.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => setEditingProject(true)}>
-              Edit project
-            </Button>
+            {project ? (
+              <Button type="button" variant="outline" onClick={() => setEditingProject(true)}>
+                Edit project
+              </Button>
+            ) : null}
             <Button type="button" onClick={() => setCreating(true)}>
               New task
               <kbd className="rounded border bg-primary-foreground/15 px-1 text-[10px]">N</kbd>
@@ -190,7 +206,7 @@ export function Board({
             id="task-search"
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
-            placeholder="Search title, description, tags"
+            placeholder={allProjects ? "Search title, description, tags, project" : "Search title, description, tags"}
             className="w-full sm:w-64"
           />
           <FilterSelect
@@ -241,9 +257,11 @@ export function Board({
 
       {tasks.length === 0 ? (
         <div className="mx-auto flex max-w-lg flex-col gap-3 px-6 py-16">
-          <h2 className="text-2xl font-medium">No tasks on this project</h2>
+          <h2 className="text-2xl font-medium">{allProjects ? "No tasks yet" : "No tasks on this project"}</h2>
           <p className="text-muted-foreground">
-            Add a task to Backlog when a person should park it, or to Todo when an agent may take it. Press N to create one.
+            {allProjects
+              ? "Add a task and choose which customer it belongs to. Press N to create one."
+              : "Add a task to Backlog when a person should park it, or to Todo when an agent may take it. Press N to create one."}
           </p>
           <Button type="button" className="w-fit" onClick={() => setCreating(true)}>Create the first task</Button>
         </div>
@@ -257,6 +275,7 @@ export function Board({
                 tasks={visible.filter((task) => task.status === status).sort((a, b) => a.position - b.position)}
                 allTasks={tasks}
                 dependencies={dependencies}
+                projectNameFor={allProjects ? (task) => projectById.get(task.project_id)?.name ?? "Project" : undefined}
                 onOpen={(id) => {
                   if (!gestures.shouldOpenFromClick()) return;
                   setOpenTaskId(id);
@@ -266,7 +285,12 @@ export function Board({
           </div>
           <DragOverlay>
             {activeTask ? (
-              <div className="w-64 rounded-xl border bg-card p-3 text-sm shadow-lg">{activeTask.title}</div>
+              <div className="w-64 rounded-xl border bg-card p-3 text-sm shadow-lg">
+                {allProjects ? (
+                  <div className="truncate text-xs text-muted-foreground">{projectById.get(activeTask.project_id)?.name}</div>
+                ) : null}
+                {activeTask.title}
+              </div>
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -280,7 +304,8 @@ export function Board({
       />
       <NewTaskDialog
         open={creating}
-        projectId={project.id}
+        projects={projectChoices}
+        projectId={project?.id ?? null}
         onOpenChange={setCreating}
         onCreated={(task) => {
           setTasks((current) => [...current, task]);
@@ -288,11 +313,13 @@ export function Board({
           router.refresh();
         }}
       />
-      <EditProjectDialog
-        open={editingProject}
-        project={project}
-        onOpenChange={setEditingProject}
-      />
+      {project ? (
+        <EditProjectDialog
+          open={editingProject}
+          project={project}
+          onOpenChange={setEditingProject}
+        />
+      ) : null}
     </div>
   );
 }
@@ -324,12 +351,14 @@ function Column({
   tasks,
   allTasks,
   dependencies,
+  projectNameFor,
   onOpen,
 }: {
   status: Status;
   tasks: Task[];
   allTasks: Task[];
   dependencies: TaskDependency[];
+  projectNameFor?: (task: Task) => string;
   onOpen: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}` });
@@ -355,6 +384,7 @@ function Column({
             <TaskCard
               key={task.id}
               task={task}
+              projectLabel={projectNameFor?.(task) ?? null}
               waiting={isWaiting(task.id, allTasks, dependencies)}
               onOpen={() => onOpen(task.id)}
             />
@@ -365,7 +395,17 @@ function Column({
   );
 }
 
-function TaskCard({ task, waiting, onOpen }: { task: Task; waiting: boolean; onOpen: () => void }) {
+function TaskCard({
+  task,
+  projectLabel,
+  waiting,
+  onOpen,
+}: {
+  task: Task;
+  projectLabel: string | null;
+  waiting: boolean;
+  onOpen: () => void;
+}) {
   const { profiles, agents } = useBoard();
   const { listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: task.id });
   const { setNodeRef: setDropRef } = useDroppable({ id: `task:${task.id}` });
@@ -398,8 +438,15 @@ function TaskCard({ task, waiting, onOpen }: { task: Task; waiting: boolean; onO
         type="button"
         onClick={onOpen}
         className="block min-w-0 flex-1 touch-manipulation rounded-r-xl px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        aria-label={`Open task ${task.number}, ${task.title}`}
+        aria-label={
+          projectLabel
+            ? `Open task ${task.number} on ${projectLabel}, ${task.title}`
+            : `Open task ${task.number}, ${task.title}`
+        }
       >
+        {projectLabel ? (
+          <span className="mb-1 block truncate text-xs font-medium tracking-wide text-primary uppercase">{projectLabel}</span>
+        ) : null}
         <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span>#{task.number}</span>
           {task.is_human ? <Badge variant="secondary">Human</Badge> : null}
@@ -423,12 +470,14 @@ function TaskCard({ task, waiting, onOpen }: { task: Task; waiting: boolean; onO
 
 function NewTaskDialog({
   open,
+  projects,
   projectId,
   onOpenChange,
   onCreated,
 }: {
   open: boolean;
-  projectId: string;
+  projects: Project[];
+  projectId: string | null;
   onOpenChange: (open: boolean) => void;
   onCreated: (task: Task) => void;
 }) {
@@ -441,6 +490,12 @@ function NewTaskDialog({
   const [url, setUrl] = useState("");
   const [tags, setTags] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [chosenProject, setChosenProject] = useState(projectId ?? projects[0]?.id ?? "");
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setChosenProject(projectId ?? projects[0]?.id ?? "");
+  }
 
   function reset() {
     setTitle("");
@@ -450,13 +505,19 @@ function NewTaskDialog({
     setUrl("");
     setTags("");
     setAssignee("");
+    setChosenProject(projectId ?? projects[0]?.id ?? "");
   }
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    const destination = projectId ?? chosenProject;
+    if (!destination) {
+      toast.error("Choose a project.");
+      return;
+    }
     startTransition(async () => {
       const result = await createTaskAction({
-        projectId,
+        projectId: destination,
         title,
         description,
         status,
@@ -481,10 +542,28 @@ function NewTaskDialog({
         <DialogHeader>
           <DialogTitle>New task</DialogTitle>
           <DialogDescription>
-            Todo is ready for an agent. Backlog stays with people. Mark Human when an agent must not take it.
+            {projectId
+              ? "Todo is ready for an agent. Backlog stays with people. Mark Human when an agent must not take it."
+              : "Choose the customer this task belongs to. Todo is ready for an agent. Backlog stays with people."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="grid max-h-[70dvh] gap-3 overflow-y-auto pr-1">
+          {projectId === null ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="task-project">Project</Label>
+              <select
+                id="task-project"
+                className={controlClass}
+                value={chosenProject}
+                required
+                onChange={(event) => setChosenProject(event.target.value)}
+              >
+                {projects.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="grid gap-1.5">
             <Label htmlFor="task-title">Title</Label>
             <Input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} />
