@@ -132,3 +132,13 @@
     font-family: var(--font-display), Georgia, serif;
   }
 }
+
+.board-touch-hint {
+  display: none;
+}
+
+@media (pointer: coarse), (max-width: 40rem) {
+  .board-touch-hint {
+    display: block;
+  }
+}

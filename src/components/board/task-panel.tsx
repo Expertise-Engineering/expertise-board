@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { addCommentAction, deleteTaskAction, loadThreadAction, patchTaskAction, updateTaskAction } from "@/actions/board";
 import { useBoard } from "@/components/shell/board-context";
 import { STATUS_META, STATUS_ORDER } from "@/lib/board/constants";
-import { waitingOn } from "@/lib/board/filters";
+import { sameProjectTasks, waitingOn } from "@/lib/board/filters";
 import { assigneeValue, formatStamp } from "@/lib/board/text";
 import type { Comment, Status, Task, TaskDependency, TaskEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 const controlClass =
-  "h-9 w-full rounded-lg border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-11 w-full rounded-lg border border-input bg-card px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-sm";
 
 export function TaskPanel({
   task,
@@ -38,7 +38,10 @@ export function TaskPanel({
 }) {
   return (
     <Sheet open={task !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent
+        side="right"
+        className="w-full max-w-full overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))] data-[side=right]:w-full data-[side=right]:max-w-none sm:data-[side=right]:max-w-xl"
+      >
         {task ? (
           <TaskForm key={task.id} task={task} tasks={tasks} dependencies={dependencies} onClose={onClose} />
         ) : (
@@ -151,7 +154,7 @@ function TaskForm({
     });
   }
 
-  const others = tasks.filter((item) => item.id !== task.id);
+  const others = sameProjectTasks(task, tasks);
 
   return (
     <div className="flex flex-col gap-5 p-1">
