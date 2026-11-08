@@ -74,8 +74,8 @@ export function AgentsAdmin({ mcpUrl }: { mcpUrl: string }) {
         </dl>
       </section>
 
-      <section aria-labelledby="create-agent-heading">
-        <h2 id="create-agent-heading" className="text-lg font-medium">Create an agent</h2>
+      <section aria-labelledby="add-agent-heading">
+        <h2 id="add-agent-heading" className="text-lg font-medium">Add an agent</h2>
         <form onSubmit={onCreate} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="grid flex-1 gap-1.5">
             <Label htmlFor="agent-name">Name</Label>
@@ -88,7 +88,7 @@ export function AgentsAdmin({ mcpUrl }: { mcpUrl: string }) {
               maxLength={80}
             />
           </div>
-          <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create agent"}</Button>
+          <Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add agent"}</Button>
         </form>
       </section>
 
@@ -96,7 +96,7 @@ export function AgentsAdmin({ mcpUrl }: { mcpUrl: string }) {
         <h2 id="agent-list-heading" className="text-lg font-medium">Directory</h2>
         {agents.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            No agents yet. Create one, copy the key, and add the MCP server in your client.
+            No agents yet. Add one, copy the key, and add the MCP server in your client.
           </p>
         ) : (
           <ul className="mt-3 divide-y rounded-2xl border bg-card">

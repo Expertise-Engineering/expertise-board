@@ -110,7 +110,7 @@ On a board, press `N` to add a task. Click or tap a card to edit it. With a mous
 
 ## Agents and MCP
 
-Agents are not shared human logins. On **Agents**, create one, and copy the raw API key when it is shown. The database stores only the SHA-256 hex of that key. Revoke stops the key. Delete removes the agent from the directory.
+Agents are not shared human logins. On **Agents**, add one, and copy the raw API key when it is shown. The database stores only the SHA-256 hex of that key. Revoke stops the key. Delete removes the agent from the directory.
 
 Active teammates can read those hashes. A removed person cannot. The raw key is never stored, and a 256-bit key is not recoverable from the hash, but do not treat the hash column as a secret from coworkers who can still open the board.
 
