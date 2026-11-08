@@ -41,7 +41,7 @@ export function AppShell({ directory, children }: { directory: Directory; childr
     setNavOpen(false);
   }
 
-  const subscriptionKey = `${directory.profile.role}:${directory.profile.revoked_at ?? ""}:${directory.projects.map((project) => project.id).join(",")}`;
+  const subscriptionKey = `${directory.profile.role}:${directory.profile.revoked_at ?? ""}`;
   useEffect(() => {
     if (!readPublicSupabaseEnv()) return;
     const supabase = createClient();
@@ -52,7 +52,7 @@ export function AppShell({ directory, children }: { directory: Directory; childr
     };
     const viewer = viewerFromRole(directory.profile.role, directory.profile.revoked_at);
     let channel = supabase.channel("expertise-board");
-    for (const subscription of realtimeSubscriptions(viewer, directory.projects.map((project) => project.id))) {
+    for (const subscription of realtimeSubscriptions(viewer)) {
       channel = channel.on(
         "postgres_changes",
         {
@@ -72,7 +72,7 @@ export function AppShell({ directory, children }: { directory: Directory; childr
       window.clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
-  }, [router, subscriptionKey, directory.profile.role, directory.profile.revoked_at, directory.projects]);
+  }, [router, subscriptionKey, directory.profile.role, directory.profile.revoked_at]);
 
   const contextValue = useMemo(
     () => ({ ...directory, openNewProject: () => setProjectOpen(true) }),

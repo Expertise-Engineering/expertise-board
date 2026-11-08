@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { normalizeRole, sessionAccess, type AccessRole } from "@/lib/access/access";
+import { directoryRoleForSession, normalizeRole, type AccessRole } from "@/lib/access/access";
 import { isAllowedEmail } from "@/lib/auth/email";
 import { readPublicSupabaseEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
@@ -32,21 +32,17 @@ export const loadOwnAccess = cache(async (userId: string): Promise<AccessRow> =>
 export async function getSessionUser(): Promise<SessionState> {
   if (!readPublicSupabaseEnv()) return { configured: false };
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const id = typeof data?.claims?.sub === "string" ? data.claims.sub : null;
-  let email = typeof data?.claims?.email === "string" ? data.claims.email : "";
-  if (id && !email) {
-    const userResult = await supabase.auth.getUser();
-    email = userResult.data.user?.email ?? "";
-  }
-  if (!id || !isAllowedEmail(email)) return { configured: true, user: null };
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) return { configured: true, user: null };
+  const id = data.user.id;
+  const email = data.user.email ?? "";
+  if (!isAllowedEmail(email)) return { configured: true, user: null };
   const access = await loadOwnAccess(id);
-  const decision = sessionAccess(
+  const decision = directoryRoleForSession(
     access ? { role: normalizeRole(access.role), revokedAt: access.revoked_at } : null,
   );
-  if (decision.state === "removed") return { configured: true, user: null, removed: true };
-  const role = decision.state === "active" ? decision.role : "user";
-  return { configured: true, user: { id, email, role } };
+  if (decision.removed) return { configured: true, user: null, removed: true };
+  return { configured: true, user: { id, email, role: decision.role } };
 }
 
 export async function requireActor(): Promise<{ supabase: Awaited<ReturnType<typeof createClient>>; actor: Actor }> {
@@ -59,10 +55,10 @@ export async function requireActor(): Promise<{ supabase: Awaited<ReturnType<typ
     redirect("/login");
   }
   const access = await loadOwnAccess(data.user.id);
-  const decision = sessionAccess(
+  const decision = directoryRoleForSession(
     access ? { role: normalizeRole(access.role), revokedAt: access.revoked_at } : null,
   );
-  if (decision.state === "removed") {
+  if (decision.removed) {
     await supabase.auth.signOut({ scope: "global" });
     redirect("/login?error=removed");
   }
@@ -81,7 +77,7 @@ export async function requireActor(): Promise<{ supabase: Awaited<ReturnType<typ
       kind: "user",
       id: data.user.id,
       name: displayName,
-      role: decision.state === "active" ? decision.role : "user",
+      role: decision.role,
     },
   };
 }

@@ -18,6 +18,15 @@ export function readPublicSupabaseEnv(): PublicSupabaseEnv | null {
   return { url, publishableKey };
 }
 
-export function readServiceRoleKey(): string | null {
-  return nonempty(process.env.SUPABASE_SERVICE_ROLE_KEY);
+/** Canonical site origin, inlined at build time. Used for the Agents MCP URL. */
+export function readSiteUrl(): string | null {
+  const value = nonempty(process.env.NEXT_PUBLIC_SITE_URL);
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
 }

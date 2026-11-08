@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isWaiting, sameProjectTasks, taskMatches } from "./filters.ts";
 import { nextPosition, placeTask } from "./order.ts";
-import { normalizeTags, slugify, uniqueSlug } from "./text.ts";
+import { errorMessage, normalizeTags, postgrestIlikeOr, slugify, uniqueSlug } from "./text.ts";
 import type { Task } from "../types.ts";
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -109,6 +109,26 @@ test("waiting ignores finished blockers", () => {
   ];
   assert.equal(isWaiting("a", tasks, [{ task_id: "a", waits_on_task_id: "b" }]), false);
   assert.equal(isWaiting("a", tasks, [{ task_id: "a", waits_on_task_id: "missing" }]), true);
+});
+
+test("driver errors stay off the message returned to the browser", () => {
+  assert.equal(
+    errorMessage(new Error('duplicate key value violates unique constraint "agents_name_key"')),
+    "An agent with that name already exists.",
+  );
+  assert.equal(
+    errorMessage(new Error("new row violates row-level security policy")),
+    "You do not have access to that.",
+  );
+  assert.equal(
+    errorMessage(new Error("insert or update on table \"comments\" violates foreign key constraint")),
+    "Something went wrong.",
+  );
+  assert.equal(errorMessage(new Error("Task title must be 1–200 characters.")), "Task title must be 1–200 characters.");
+  assert.equal(
+    postgrestIlikeOr(["title", "description"], '100% "done", (a)'),
+    'title.ilike."%100\\% done a%",description.ilike."%100\\% done a%"',
+  );
 });
 
 test("positions land before a card or at the end", () => {

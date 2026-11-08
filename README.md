@@ -35,7 +35,8 @@ npm run build
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser and server | Project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser and server | Publishable key. `NEXT_PUBLIC_SUPABASE_ANON_KEY` is accepted instead |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only | Agent MCP. Never expose this to the browser |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only | Agent MCP, and adding an agent. Never expose this to the browser |
+| `NEXT_PUBLIC_SITE_URL` | Build | Canonical origin for the MCP URL on Agents, such as `https://board.example.netlify.app`. When it is unset, Agents shows `/api/mcp` |
 
 `NEXT_PUBLIC_*` values are inlined when Next builds. Set them before `npm run build` and before a Netlify build. The service role key is read on the server at request time.
 
@@ -49,14 +50,14 @@ SQL lives in [`supabase/migrations`](supabase/migrations). Apply every file, in 
 supabase db push
 ```
 
-`20261108001000_initial_schema.sql` creates the board. `20261108180000_access_classes.sql` adds roles, project class, and the stricter row policies. Apply both. The access migration is safe to run when Cory's auth user is not in the database yet: it still records `cm@exp-eng.com` as an executive, and the signup trigger keeps that role when the account appears.
+`20261108001000_initial_schema.sql` creates the board. `20261108180000_access_classes.sql` adds roles, project class, and the stricter row policies. `20261108200000_access_hardening.sql` binds authors to the session, keeps agent key hashes off the Data API, and checks the JWT role instead of `session_user`. Apply all three, in order. The access migration is safe to run when Cory's auth user is not in the database yet: it still records `cm@exp-eng.com` as an executive, and the signup trigger keeps that role when the account appears.
 
 The initial migration:
 
 - Creates profiles, agents, projects, tasks, comments, task events, and task dependencies
 - Rejects any `auth.users` email that is not `@exp-eng.com`, and creates a profile whose display name is the email local-part
 - Enables RLS. The first version let every signed-in user read and write every row. The access migration replaces those policies
-- Publishes `tasks`, `comments`, `projects`, and `task_events` to `supabase_realtime`
+- Publishes `tasks`, `comments`, `projects`, and `task_events` to `supabase_realtime`. The hardening migration removes those tables from the publication and publishes `board_ticks` instead
 - Adds `next_task_number(project_id)` and a service-role-only `claim_next_task` helper
 
 No project seed data is included. The access migration does seed one executive.
@@ -75,7 +76,7 @@ Role and removed status live in `public.directory`, keyed by email. `profiles.ro
 - **Admin** (executives only) lists people and projects. Add an email and a role before that person signs in, change a role, or remove someone. Remove is reversible: it sets `revoked_at` and keeps their history. Their next request is signed out, and the company-email rule will not let them back in until an executive restores them.
 - The last active executive cannot be demoted or removed.
 
-Row level security enforces the same split on projects, tasks, comments, task events, dependencies, agents, profiles, and the directory. A removed person cannot read executive rows or regular ones. Realtime `DELETE` events are not filtered by row security, so regular browsers subscribe only to the regular projects they can already see. Comments and task events store `project_id` for that filter. Helper functions that bypass row security live in the unexposed `private` schema. There is no `security definer` function in `public`, and there are no views.
+Row level security enforces the same split on projects, tasks, comments, task events, dependencies, agents, profiles, and the directory. A removed person cannot read executive rows or regular ones. Live updates are a `board_ticks` row per audience. Regular members can read the regular tick. The executive tick is not readable by them, and task bodies are not in the realtime publication. Helper functions that bypass row security live in the unexposed `private` schema. Public functions added for writes are `security invoker`. There are no views.
 
 In the Supabase dashboard, add your site to **Authentication → URL configuration**:
 
@@ -106,13 +107,11 @@ What you see depends on your role. Executives get an **Admin** link in the sideb
 
 **All projects** (`/`) is where you land. It is one board of every customer you can see, in the same columns, with the same filters — including Assignee, so one person or agent can be seen across those customers. Leave Assignee on Anyone to see that whole set. Each card names its customer. An executive card also says Executive. Moving a card changes its column and leaves it on that project. A new task asks which project it belongs to. The sidebar also opens any single project. Executives can mark a project executive when they create it or edit it.
 
-On a board, press `N` to add a task. Click or tap a card to edit it. With a mouse, drag a card between columns. On a phone, drag the Move handle on the left of the card — a finger drag on the card itself scrolls the board. Changing Column inside the card moves it too. Realtime updates the board when tasks, comments, projects, or activity change.
+On a board, press `N` to add a task. Click or tap a card to edit it. With a mouse, drag a card between columns. On a phone, drag the Move handle on the left of the card — a finger drag on the card itself scrolls the board. Changing Column inside the card moves it too. Realtime refreshes the board when the tick for your audience changes.
 
 ## Agents and MCP
 
-Agents are not shared human logins. On **Agents**, add one, and copy the raw API key when it is shown. The database stores only the SHA-256 hex of that key. Revoke stops the key. Delete removes the agent from the directory.
-
-Active teammates can read those hashes. A removed person cannot. The raw key is never stored, and a 256-bit key is not recoverable from the hash, but do not treat the hash column as a secret from coworkers who can still open the board.
+Agents are not shared human logins. On **Agents**, any active teammate can add one, revoke it, or delete it. Copy the raw API key when it is shown. The database stores only the SHA-256 hex of that key. The raw key is never stored. Teammates cannot read or replace the stored hash. Adding an agent uses the server's service role key, which is not available in the browser.
 
 The endpoint is stateless Streamable HTTP and answers with JSON:
 

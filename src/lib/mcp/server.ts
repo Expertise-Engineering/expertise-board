@@ -7,7 +7,7 @@ import { hashApiKey } from "@/lib/agents/keys";
 import { canSeeProject } from "@/lib/access/access";
 import { isWaiting } from "@/lib/board/filters";
 import { BoardError, addComment, createTask, resolveProject, updateTask } from "@/lib/board/mutate";
-import { errorMessage, isStatus, isUuid, parseAssignee } from "@/lib/board/text";
+import { errorMessage, isStatus, isUuid, parseAssignee, postgrestIlikeOr } from "@/lib/board/text";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Actor, Agent, Project, Status, Task, TaskDependency } from "@/lib/types";
 
@@ -42,7 +42,7 @@ function text(value: unknown, isError = false) {
 }
 
 function failure(error: unknown) {
-  return text(error instanceof BoardError ? error.message : errorMessage(error), true);
+  return text(errorMessage(error), true);
 }
 
 async function projectMap(supabase: Db, tasks: Task[]) {
@@ -146,7 +146,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
     {
       title: "List tasks",
       description:
-        "List tasks. Filter by project slug or id, status, tag, is_human, assignee (user:<uuid>, agent:<uuid>, me, or unassigned), and free text.",
+        "List tasks. Filter by project slug or id, status, tag, is_human, assignee (user:<uuid>, agent:<uuid>, me, or unassigned), and free text. Pages are applied in the database. next_offset is null on the last page.",
       inputSchema: {
         project: z.string().optional().describe("Project slug or id"),
         status: statusSchema.optional(),
@@ -154,6 +154,8 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
         is_human: z.boolean().optional(),
         assignee: z.string().optional().describe("user:<uuid>, agent:<uuid>, me, or unassigned"),
         query: z.string().optional().describe("Case-insensitive match against title and description"),
+        limit: z.number().int().min(1).max(100).optional().describe("Page size. Defaults to 50."),
+        offset: z.number().int().min(0).optional().describe("Rows to skip. Defaults to 0."),
       },
     },
     async (args) => {
@@ -172,10 +174,12 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
           if (projectError) return failure(projectError);
           visibleProjects = (projectRows ?? []).map((row) => row.id as string);
         }
-        if (visibleProjects.length === 0) return text({ tasks: [] });
+        const limit = args.limit ?? 50;
+        const offset = args.offset ?? 0;
+        if (visibleProjects.length === 0) return text({ tasks: [], next_offset: null });
         let assignee = args.assignee;
         if (assignee === "me") assignee = `agent:${agent.id}`;
-        let query = supabase.from("tasks").select("*").in("project_id", visibleProjects).limit(300);
+        let query = supabase.from("tasks").select("*").in("project_id", visibleProjects);
         if (projectId) query = query.eq("project_id", projectId);
         if (args.status) query = query.eq("status", args.status);
         if (typeof args.is_human === "boolean") query = query.eq("is_human", args.is_human);
@@ -187,15 +191,15 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
           if (parsed.userId) query = query.eq("assignee_user_id", parsed.userId);
           if (parsed.agentId) query = query.eq("assignee_agent_id", parsed.agentId);
         }
-        const { data, error } = await query.order("number", { ascending: true });
+        const textFilter = args.query ? postgrestIlikeOr(["title", "description"], args.query) : null;
+        if (textFilter) query = query.or(textFilter);
+        const { data, error } = await query
+          .order("number", { ascending: true })
+          .range(offset, offset + limit);
         if (error) return failure(error);
-        let tasks = (data ?? []) as Task[];
-        const needle = args.query?.trim().toLowerCase();
-        if (needle) {
-          tasks = tasks.filter((task) =>
-            `${task.title}\n${task.description}`.toLowerCase().includes(needle),
-          );
-        }
+        const page = (data ?? []) as Task[];
+        const nextOffset = page.length > limit ? offset + limit : null;
+        let tasks = page.slice(0, limit);
         const projects = await projectMap(supabase, tasks);
         const visibleIds = new Set(
           [...projects.values()].filter((project) => canSeeProject(actor, project.access_class)).map((project) => project.id),
@@ -210,6 +214,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
         const known = [...tasks, ...blockers];
         return text({
           tasks: tasks.map((task) => presentTask(task, projects, dependencies, known)),
+          next_offset: nextOffset,
         });
       } catch (error) {
         return failure(error);

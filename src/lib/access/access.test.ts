@@ -19,6 +19,7 @@ import {
   realtimeSubscriptions,
   resolveProjectClassChange,
   resolveProjectClassForWrite,
+  directoryRoleForSession,
   sessionAccess,
   taskMoveWrite,
   visibleWorkspace,
@@ -214,15 +215,23 @@ test("admin can add, retitle roles, remove, and restore, but not lock out the la
   assert.deepEqual(back, { ok: true, email: "ada@exp-eng.com", role: "user", revoked: false });
 });
 
-test("regular realtime subscriptions are limited to regular projects", () => {
-  const regular = realtimeSubscriptions({ kind: "user" }, [REGULAR]);
-  assert.equal(regular.find((item) => item.table === "projects")?.filter, "access_class=eq.user");
-  assert.equal(regular.find((item) => item.table === "tasks")?.filter, `project_id=in.(${REGULAR})`);
-  assert.equal(regular.find((item) => item.table === "comments")?.filter?.includes(EXECUTIVE), false);
-  assert.equal(realtimeSubscriptions({ kind: "executive" }, [REGULAR]).every((item) => item.filter === undefined), true);
-  const empty = realtimeSubscriptions({ kind: "user" }, []);
-  assert.equal(empty.find((item) => item.table === "tasks")?.filter?.includes(EXECUTIVE), false);
-  assert.match(empty.find((item) => item.table === "task_events")?.filter ?? "", /project_id=eq\./);
+test("realtime subscriptions listen to a tick, not task rows", () => {
+  const regular = realtimeSubscriptions({ kind: "user" });
+  assert.deepEqual(regular, [{ table: "board_ticks", filter: "scope=eq.regular" }]);
+  assert.equal(regular.some((item) => item.table === "board_ticks" && item.filter?.includes("executive")), false);
+  assert.deepEqual(realtimeSubscriptions({ kind: "executive" }), [{ table: "board_ticks" }]);
+  assert.equal(realtimeSubscriptions({ kind: "revoked" })[0]?.filter, "scope=eq.none");
+});
+
+test("a missing directory row stays a regular user", () => {
+  assert.deepEqual(directoryRoleForSession(null), { removed: false, role: "user" });
+  assert.deepEqual(directoryRoleForSession({ role: "executive", revokedAt: null }), {
+    removed: false,
+    role: "executive",
+  });
+  assert.deepEqual(directoryRoleForSession({ role: "user", revokedAt: "2026-11-08T00:00:00.000Z" }), {
+    removed: true,
+  });
 });
 
 test("access migration stores roles in directory, seeds Cory, and does not trust user metadata", () => {

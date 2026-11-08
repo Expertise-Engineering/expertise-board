@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { normalizeRole, sessionAccess } from "@/lib/access/access";
+import { directoryRoleForSession, normalizeRole } from "@/lib/access/access";
 import { isAllowedEmail } from "@/lib/auth/email";
 import { readPublicSupabaseEnv } from "@/lib/env";
 
@@ -59,14 +59,17 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Refresh and verify the session before any other auth decision.
+  // Verify the user with the Auth server before any directory or removed decision.
   let userId: string | null = null;
   let email: string | null = null;
   try {
-    const { data } = await supabase.auth.getClaims();
-    const claims = data?.claims;
-    userId = typeof claims?.sub === "string" ? claims.sub : null;
-    email = typeof claims?.email === "string" ? claims.email : null;
+    const { data, error } = await supabase.auth.getUser();
+    if (data.user) {
+      userId = data.user.id;
+      email = data.user.email ?? null;
+    } else if (error && !/auth session missing/i.test(error.message)) {
+      if (/fetch|network|timeout|unavailable/i.test(error.message)) throw error;
+    }
   } catch {
     if (!isLogin && !isAuthRoute) {
       const url = request.nextUrl.clone();
@@ -91,8 +94,9 @@ export async function updateSession(request: NextRequest) {
       .eq("user_id", userId)
       .maybeSingle();
     const removed = !accessError
-      && access
-      && sessionAccess({ role: normalizeRole(access.role), revokedAt: access.revoked_at }).state === "removed";
+      && directoryRoleForSession(
+        access ? { role: normalizeRole(access.role), revokedAt: access.revoked_at } : null,
+      ).removed;
     if (removed) {
       try {
         await supabase.auth.signOut({ scope: "global" });
