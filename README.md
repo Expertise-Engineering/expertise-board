@@ -86,7 +86,7 @@ The domain is checked in three places: the login form, the sign-in confirmation 
 
 Everyone who is signed in can see and edit the whole board. Click your name in the sidebar to change the display name.
 
-On a project board, press `N` to add a task. Drag a card between columns, or change the column in the task panel. Realtime updates the board when tasks, comments, projects, or activity change.
+On a project board, press `N` to add a task. Click or tap a card to edit it. With a mouse, drag a card between columns. On a phone, drag the Move handle on the left of the card — a finger drag on the card itself scrolls the board. Changing Column inside the card moves it too. Realtime updates the board when tasks, comments, projects, or activity change.
 
 ## Agents and MCP
 

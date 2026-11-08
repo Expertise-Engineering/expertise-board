@@ -23,7 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 const controlClass =
-  "h-9 w-full rounded-lg border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-11 w-full rounded-lg border border-input bg-card px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-sm";
 
 export function TaskPanel({
   task,
@@ -38,7 +38,10 @@ export function TaskPanel({
 }) {
   return (
     <Sheet open={task !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent
+        side="right"
+        className="w-full max-w-full overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))] data-[side=right]:w-full data-[side=right]:max-w-none sm:data-[side=right]:max-w-xl"
+      >
         {task ? (
           <TaskForm key={task.id} task={task} tasks={tasks} dependencies={dependencies} onClose={onClose} />
         ) : (

@@ -3,7 +3,6 @@
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -11,13 +10,16 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { GripVertical } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { CardPointerSensor } from "@/components/board/card-pointer-sensor";
 import { createTaskAction, deleteProjectAction, patchTaskAction, updateProjectAction } from "@/actions/board";
 import { TaskPanel } from "@/components/board/task-panel";
 import { useBoard } from "@/components/shell/board-context";
 import { STATUS_META, STATUS_ORDER } from "@/lib/board/constants";
+import { CARD_DRAG_DISTANCE_PX, createDragClickGate } from "@/lib/board/gestures";
 import { EMPTY_FILTERS, isWaiting, taskMatches, type TaskFilters } from "@/lib/board/filters";
 import { nextPosition } from "@/lib/board/order";
 import { assigneeValue, isStatus } from "@/lib/board/text";
@@ -76,8 +78,13 @@ export function Board({
   const [creating, setCreating] = useState(false);
   const [editingProject, setEditingProject] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const dragged = useRef(false);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // useState calls this once. The gate mutates; it is not React state.
+  const [gestures] = useState(createDragClickGate);
+  const sensors = useSensors(
+    useSensor(CardPointerSensor, { activationConstraint: { distance: CARD_DRAG_DISTANCE_PX } }),
+  );
+
+  useEffect(() => () => gestures.dispose(), [gestures]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -105,17 +112,19 @@ export function Board({
   const columns = filters.status === "all" ? STATUS_ORDER : [filters.status];
 
   function onDragStart(event: DragStartEvent) {
-    dragged.current = true;
+    gestures.onDragStart();
     setActiveId(String(event.active.id));
+  }
+
+  function finishDrag() {
+    setActiveId(null);
+    gestures.onDragFinished();
   }
 
   function onDragEnd(event: DragEndEvent) {
     const taskId = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
-    setActiveId(null);
-    window.setTimeout(() => {
-      dragged.current = false;
-    }, 0);
+    finishDrag();
     if (!overId) return;
     const task = tasks.find((item) => item.id === taskId);
     if (!task) return;
@@ -160,6 +169,9 @@ export function Board({
             <h1 className="truncate text-3xl font-medium tracking-tight">{project.name}</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               {project.description || "Add a short description so the team knows which customer this is."}
+            </p>
+            <p className="board-touch-hint mt-2 max-w-2xl text-sm leading-5 text-muted-foreground">
+              Tap a card to edit it. Drag the Move handle to another column, or change Column inside the card.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -236,8 +248,8 @@ export function Board({
           <Button type="button" className="w-fit" onClick={() => setCreating(true)}>Create the first task</Button>
         </div>
       ) : (
-        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
-          <div className="flex flex-1 gap-3 overflow-x-auto px-4 py-4 sm:px-6">
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={finishDrag}>
+          <div className="flex flex-1 gap-3 overflow-x-auto overscroll-x-contain px-4 py-4 sm:px-6">
             {columns.map((status) => (
               <Column
                 key={status}
@@ -246,7 +258,7 @@ export function Board({
                 allTasks={tasks}
                 dependencies={dependencies}
                 onOpen={(id) => {
-                  if (dragged.current) return;
+                  if (!gestures.shouldOpenFromClick()) return;
                   setOpenTaskId(id);
                 }}
               />
@@ -369,13 +381,23 @@ function TaskCard({ task, waiting, onOpen }: { task: Task; waiting: boolean; onO
         setDragRef(node);
         setDropRef(node);
       }}
-      className={`rounded-xl border border-l-4 bg-card shadow-sm ${rails[task.status]} ${isDragging ? "opacity-40" : ""}`}
+      className={`flex overflow-hidden rounded-xl border border-l-4 bg-card shadow-sm ${rails[task.status]} ${isDragging ? "opacity-40" : ""}`}
       {...listeners}
     >
+      <div
+        data-drag-handle=""
+        aria-hidden="true"
+        title="Drag to move"
+        onContextMenu={(event) => event.preventDefault()}
+        className="flex w-11 shrink-0 cursor-grab touch-none flex-col items-center justify-center gap-0.5 border-r bg-muted/50 text-xs font-medium text-muted-foreground select-none [-webkit-touch-callout:none] active:cursor-grabbing"
+      >
+        <GripVertical className="pointer-events-none size-4" />
+        <span className="pointer-events-none">Move</span>
+      </div>
       <button
         type="button"
         onClick={onOpen}
-        className="block w-full rounded-xl px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="block min-w-0 flex-1 touch-manipulation rounded-r-xl px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         aria-label={`Open task ${task.number}, ${task.title}`}
       >
         <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
