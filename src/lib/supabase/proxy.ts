@@ -3,6 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAllowedEmail } from "@/lib/auth/email";
 import { readPublicSupabaseEnv } from "@/lib/env";
 
+function sealAuth(response: NextResponse, pathname: string) {
+  if (!pathname.startsWith("/auth")) return response;
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Referrer-Policy", "same-origin");
+  response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return response;
+}
+
 function copySession(from: NextResponse, to: NextResponse) {
   from.cookies.getAll().forEach((cookie) => {
     to.cookies.set(cookie);
@@ -16,13 +24,14 @@ function copySession(from: NextResponse, to: NextResponse) {
 
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const finish = (response: NextResponse) => sealAuth(response, pathname);
   if (pathname.startsWith("/api/mcp")) {
     return NextResponse.next({ request });
   }
 
   const env = readPublicSupabaseEnv();
   if (!env) {
-    return NextResponse.next({ request });
+    return finish(NextResponse.next({ request }));
   }
 
   const isAuthRoute = pathname.startsWith("/auth");
@@ -62,16 +71,16 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.searchParams.set("error", "unavailable");
-      return copySession(supabaseResponse, NextResponse.redirect(url));
+      return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
     }
-    return supabaseResponse;
+    return finish(supabaseResponse);
   }
 
   if (email && !isAllowedEmail(email) && pathname !== "/auth/rejected") {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/rejected";
     url.search = "";
-    return copySession(supabaseResponse, NextResponse.redirect(url));
+    return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
   }
 
   if (!userId && !isLogin && !isAuthRoute) {
@@ -80,15 +89,15 @@ export async function updateSession(request: NextRequest) {
     const next = `${pathname}${request.nextUrl.search}`;
     if (next !== "/") url.searchParams.set("next", next);
     else url.search = "";
-    return copySession(supabaseResponse, NextResponse.redirect(url));
+    return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
   }
 
   if (userId && isLogin) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";
-    return copySession(supabaseResponse, NextResponse.redirect(url));
+    return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
   }
 
-  return supabaseResponse;
+  return finish(supabaseResponse);
 }

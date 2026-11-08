@@ -1,39 +1,95 @@
 import { NextResponse } from "next/server";
-import type { EmailOtpType } from "@supabase/supabase-js";
-import { isAllowedEmail, safeNextPath } from "@/lib/auth/email";
+import { isAllowedEmail } from "@/lib/auth/email";
+import {
+  credentialParamsFromEntries,
+  isTrustedAuthPost,
+  loginErrorForAuthFailure,
+  loginPath,
+  planAuthCallback,
+  type LoginErrorCode,
+} from "@/lib/auth/callback";
 import { readPublicSupabaseEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
+function redirectTo(requestUrl: string, path: string): NextResponse {
+  const response = NextResponse.redirect(new URL(path, requestUrl), 303);
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Referrer-Policy", "same-origin");
+  response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return response;
+}
+
 export async function GET(request: Request) {
+  return showOrReject(request, "GET");
+}
+
+export async function HEAD(request: Request) {
+  const response = await showOrReject(request, "HEAD");
+  return new NextResponse(null, { status: response.status, headers: response.headers });
+}
+
+async function showOrReject(request: Request, method: "GET" | "HEAD") {
   const url = new URL(request.url);
-  if (!readPublicSupabaseEnv()) {
-    return NextResponse.redirect(new URL("/login?error=config", url.origin));
+  if (!readPublicSupabaseEnv()) return redirectTo(request.url, loginPath("config"));
+  const plan = planAuthCallback(method, url.searchParams);
+  if (plan.consume) return redirectTo(request.url, loginPath("auth"));
+  return redirectTo(request.url, plan.location);
+}
+
+export async function POST(request: Request) {
+  if (!readPublicSupabaseEnv()) return redirectTo(request.url, loginPath("config"));
+  if (
+    !isTrustedAuthPost(request.url, {
+      origin: request.headers.get("origin"),
+      referer: request.headers.get("referer"),
+      host: request.headers.get("host"),
+      secFetchSite: request.headers.get("sec-fetch-site"),
+    })
+  ) {
+    return redirectTo(request.url, loginPath("auth"));
   }
 
-  const code = url.searchParams.get("code");
-  const tokenHash = url.searchParams.get("token_hash");
-  const type = url.searchParams.get("type");
-  const next = safeNextPath(url.searchParams.get("next"));
-  const supabase = await createClient();
-
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) return NextResponse.redirect(new URL("/login?error=auth", url.origin));
-  } else if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: type as EmailOtpType,
-    });
-    if (error) return NextResponse.redirect(new URL("/login?error=auth", url.origin));
-  } else {
-    return NextResponse.redirect(new URL("/login?error=auth", url.origin));
+  let entries: [string, string][];
+  try {
+    const form = await request.formData();
+    entries = [];
+    for (const [key, value] of form.entries()) {
+      if (typeof value === "string") entries.push([key, value]);
+    }
+  } catch {
+    return redirectTo(request.url, loginPath("auth"));
   }
 
-  const { data } = await supabase.auth.getUser();
-  if (!data.user?.email || !isAllowedEmail(data.user.email)) {
-    await supabase.auth.signOut();
-    return NextResponse.redirect(new URL("/login?error=domain", url.origin));
+  const plan = planAuthCallback("POST", credentialParamsFromEntries(entries));
+  if (!plan.consume) return redirectTo(request.url, plan.location);
+
+  let failure: LoginErrorCode = "auth";
+  try {
+    const supabase = await createClient();
+    const { error } =
+      plan.decision.method === "otp"
+        ? await supabase.auth.verifyOtp({
+            token_hash: plan.decision.tokenHash,
+            type: plan.decision.otpType,
+          })
+        : await supabase.auth.exchangeCodeForSession(plan.decision.code);
+    if (error) {
+      failure = loginErrorForAuthFailure(error);
+    } else {
+      const { data, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        await supabase.auth.signOut();
+        failure = "unavailable";
+      } else if (!data.user?.email || !isAllowedEmail(data.user.email)) {
+        await supabase.auth.signOut();
+        failure = "domain";
+      } else {
+        return redirectTo(request.url, plan.decision.next);
+      }
+    }
+  } catch {
+    failure = "unavailable";
   }
 
-  return NextResponse.redirect(new URL(next, url.origin));
+  return redirectTo(request.url, loginPath(failure));
 }

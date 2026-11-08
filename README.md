@@ -64,17 +64,25 @@ In the Supabase dashboard, add your site to **Authentication → URL configurati
 - Site URL: `http://localhost:3000` locally, and the Netlify URL in production
 - Redirect URLs: `http://localhost:3000/auth/callback` and `https://<your-site>/auth/callback`
 
-If `next dev` is started on another port, use that origin in both values. The magic link redirects to whatever origin requested it.
+If `next dev` is started on another port, use that origin in both values. The app sends that origin as `emailRedirectTo`.
 
-Magic links use the PKCE code flow. Open the link in the same browser that requested it.
+Magic Link and Confirm signup emails must not use `{{ .ConfirmationURL }}`. That URL verifies the one-time token on the first GET, so Outlook Safe Links and other mail scanners use the link before the person who asked for it can sign in. Point both templates at this app:
+
+```html
+<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email">Sign in</a></p>
+```
+
+A GET or HEAD of that URL only shows a confirmation page. The token is checked when the person chooses **Sign in**, including from a different browser than the one that requested the link. `type=magiclink` and `type=signup` are accepted too.
+
+Links that still arrive as `?code=` are the older PKCE redirect. Those are exchanged only after the same confirmation, and only the browser that requested the link has the verifier.
 
 ## How people sign in
 
 1. Open `/login`.
 2. Enter an `@exp-eng.com` address.
-3. Open the magic link.
+3. Open the magic link and choose **Sign in**.
 
-The domain is checked in three places: the login form, `/auth/callback` (a bad session is signed out), and a `BEFORE INSERT OR UPDATE` trigger on `auth.users`. The Next.js 16 proxy in `src/proxy.ts` (the successor to middleware) refreshes the session and sends signed-out visitors to `/login`. `/api/mcp` is not behind that login redirect.
+The domain is checked in three places: the login form, the sign-in confirmation (`/auth/callback`), and a `BEFORE INSERT OR UPDATE` trigger on `auth.users`. An expired or already-used link returns to `/login` with its own message. The Next.js 16 proxy in `src/proxy.ts` (the successor to middleware) refreshes the session and sends signed-out visitors to `/login`. `/api/mcp` is not behind that login redirect.
 
 Everyone who is signed in can see and edit the whole board. Click your name in the sidebar to change the display name.
 
@@ -130,7 +138,7 @@ Tools:
 
 1. Import this repository in Netlify.
 2. Set the three environment variables before the first production build.
-3. Add the deployed origin and `/auth/callback` to the Supabase redirect allow list.
+3. Add the deployed origin and `/auth/callback` to the Supabase redirect allow list, and point the Magic Link and Confirm signup templates at `/auth/callback?token_hash={{ .TokenHash }}&type=email`.
 4. Apply the migration if it is not on the linked database yet.
 
 ## License

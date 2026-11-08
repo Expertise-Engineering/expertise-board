@@ -1,23 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { loginErrorMessage } from "@/lib/auth/callback";
 import { isAllowedEmail } from "@/lib/auth/email";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const ERRORS: Record<string, string> = {
-  domain: "Only @exp-eng.com addresses can use this board. That sign-in was stopped.",
-  auth: "That magic link could not be confirmed. Request a new one and open it in this browser.",
-  config: "Supabase is not configured yet.",
-  unavailable: "The auth service did not respond. Try again in a moment.",
-};
-
 export function LoginForm({ errorCode }: { errorCode?: string }) {
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | null>(errorCode ? ERRORS[errorCode] ?? "Sign-in failed." : null);
+  const [message, setMessage] = useState<string | null>(loginErrorMessage(errorCode));
   const [sent, setSent] = useState(false);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -41,7 +35,7 @@ export function LoginForm({ errorCode }: { errorCode?: string }) {
         setMessage(error.message);
       } else {
         setSent(true);
-        setMessage("Check your inbox for a magic link. Open it in this same browser.");
+        setMessage("Check your inbox for a magic link. Open it, then choose Sign in.");
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not send the magic link.");
@@ -56,7 +50,7 @@ export function LoginForm({ errorCode }: { errorCode?: string }) {
         <p className="text-sm font-medium tracking-wide text-primary uppercase">Expertise Engineering</p>
         <h1 className="text-4xl font-medium tracking-tight">Sign in to the board</h1>
         <p className="text-base leading-relaxed text-muted-foreground">
-          People sign in with a magic link. Only @exp-eng.com mailboxes can join. Agents do not use this page — they connect with an API key.
+          People sign in with a magic link, then confirm on the board. Only @exp-eng.com mailboxes can join. Agents do not use this page — they connect with an API key.
         </p>
       </div>
       <form onSubmit={onSubmit} className="grid gap-4 rounded-2xl border bg-card p-5 shadow-sm">
