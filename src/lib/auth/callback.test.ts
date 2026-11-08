@@ -80,6 +80,11 @@ test("a missing PKCE verifier is not reported as an expired link", () => {
     loginErrorForAuthFailure({ message: "both auth code and code verifier should be non-empty" }),
     "pkce",
   );
+  assert.equal(
+    loginErrorForAuthFailure({ message: "This account has been removed from Expertise Board" }),
+    "removed",
+  );
+  assert.match(loginErrorMessage("removed") ?? "", /removed from Expertise Board/);
   assert.equal(loginErrorMessage("expired"), "That magic link has expired or was already used. Request a new one.");
   assert.equal(loginErrorMessage("pkce")?.includes("browser that requested it"), true);
   assert.equal(loginErrorMessage("nope"), "Sign-in failed.");

@@ -1,3 +1,5 @@
+import type { AccessRole, ProjectClass } from "@/lib/access/access";
+
 export const STATUSES = ["backlog", "todo", "doing", "review", "done"] as const;
 
 export type Status = (typeof STATUSES)[number];
@@ -7,6 +9,11 @@ export type Profile = {
   email: string;
   display_name: string;
   created_at: string;
+  revoked_at: string | null;
+};
+
+export type SessionProfile = Profile & {
+  role: AccessRole;
 };
 
 export type Agent = {
@@ -22,6 +29,7 @@ export type Project = {
   name: string;
   slug: string;
   description: string;
+  access_class: ProjectClass;
   sort_order: number;
   created_at: string;
   created_by: string | null;
@@ -49,6 +57,7 @@ export type Task = {
 export type Comment = {
   id: string;
   task_id: string;
+  project_id: string;
   body: string;
   author_user_id: string | null;
   author_agent_id: string | null;
@@ -60,6 +69,7 @@ export type TaskEventKind = "created" | "moved" | "assigned" | "commented" | "up
 export type TaskEvent = {
   id: string;
   task_id: string;
+  project_id: string;
   kind: TaskEventKind;
   from_status: Status | null;
   to_status: Status | null;
@@ -75,5 +85,7 @@ export type TaskDependency = {
 };
 
 export type Actor =
-  | { kind: "user"; id: string; name: string }
+  | { kind: "user"; id: string; name: string; role: AccessRole }
   | { kind: "agent"; id: string; name: string };
+
+export type { AccessRole, ProjectClass };

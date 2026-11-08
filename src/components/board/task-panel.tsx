@@ -187,8 +187,10 @@ function TaskForm({
           >
             <option value="">Unassigned</option>
             <optgroup label="People">
-              {profiles.map((profile) => (
-                <option key={profile.id} value={assigneeValue(profile.id, null)}>{profile.display_name}</option>
+              {profiles.filter((profile) => !profile.revoked_at || profile.id === task.assignee_user_id).map((profile) => (
+                <option key={profile.id} value={assigneeValue(profile.id, null)}>
+                  {profile.display_name}{profile.revoked_at ? " (removed)" : ""}
+                </option>
               ))}
             </optgroup>
             <optgroup label="Agents">

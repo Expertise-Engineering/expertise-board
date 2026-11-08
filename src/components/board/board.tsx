@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CardPointerSensor } from "@/components/board/card-pointer-sensor";
 import { createTaskAction, deleteProjectAction, patchTaskAction, updateProjectAction } from "@/actions/board";
+import type { ProjectClass } from "@/lib/access/access";
 import { TaskPanel } from "@/components/board/task-panel";
 import { useBoard } from "@/components/shell/board-context";
 import { STATUS_META, STATUS_ORDER } from "@/lib/board/constants";
@@ -181,7 +182,7 @@ export function Board({
             <h1 className="truncate text-3xl font-medium tracking-tight">{allProjects ? "All projects" : project.name}</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               {allProjects
-                ? "Every customer's tasks. Filter by assignee to see one person's work across all of them."
+                ? "Tasks on the projects you can see. Filter by assignee to see one person's work across them."
                 : project.description || "Add a short description so the team knows which customer this is."}
             </p>
             <p className="board-touch-hint mt-2 max-w-2xl text-sm leading-5 text-muted-foreground">
@@ -242,7 +243,7 @@ export function Board({
             <option value="all">Anyone</option>
             <option value="unassigned">Unassigned</option>
             <optgroup label="People">
-              {profiles.map((profile) => (
+              {profiles.filter((profile) => !profile.revoked_at).map((profile) => (
                 <option key={profile.id} value={`user:${profile.id}`}>{profile.display_name}</option>
               ))}
             </optgroup>
@@ -275,7 +276,11 @@ export function Board({
                 tasks={visible.filter((task) => task.status === status).sort((a, b) => a.position - b.position)}
                 allTasks={tasks}
                 dependencies={dependencies}
-                projectNameFor={allProjects ? (task) => projectById.get(task.project_id)?.name ?? "Project" : undefined}
+                projectNameFor={allProjects ? (task) => {
+                  const owner = projectById.get(task.project_id);
+                  if (!owner) return "Project";
+                  return owner.access_class === "executive" ? `${owner.name} · Executive` : owner.name;
+                } : undefined}
                 onOpen={(id) => {
                   if (!gestures.shouldOpenFromClick()) return;
                   setOpenTaskId(id);
@@ -586,7 +591,7 @@ function NewTaskDialog({
               <select id="task-assignee" className={controlClass} value={assignee} onChange={(event) => setAssignee(event.target.value)}>
                 <option value="">Unassigned</option>
                 <optgroup label="People">
-                  {profiles.map((profile) => (
+                  {profiles.filter((profile) => !profile.revoked_at).map((profile) => (
                     <option key={profile.id} value={assigneeValue(profile.id, null)}>{profile.display_name}</option>
                   ))}
                 </optgroup>
@@ -632,8 +637,10 @@ function EditProjectDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const { profile } = useBoard();
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description);
+  const [accessClass, setAccessClass] = useState<ProjectClass>(project.access_class);
   const [pending, startTransition] = useTransition();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
@@ -642,6 +649,7 @@ function EditProjectDialog({
     if (open) {
       setName(project.name);
       setDescription(project.description);
+      setAccessClass(project.access_class);
       setConfirmingDelete(false);
     }
   }
@@ -649,7 +657,12 @@ function EditProjectDialog({
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     startTransition(async () => {
-      const result = await updateProjectAction({ id: project.id, name, description });
+      const result = await updateProjectAction({
+        id: project.id,
+        name,
+        description,
+        ...(profile.role === "executive" ? { accessClass } : {}),
+      });
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -687,6 +700,19 @@ function EditProjectDialog({
             <Label htmlFor="edit-project-description">Description</Label>
             <Textarea id="edit-project-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
           </div>
+          {profile.role === "executive" ? (
+            <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+              <div>
+                <Label htmlFor="edit-project-class">Executive project</Label>
+                <p className="text-xs text-muted-foreground">Regular teammates and agents cannot see it.</p>
+              </div>
+              <Switch
+                id="edit-project-class"
+                checked={accessClass === "executive"}
+                onCheckedChange={(checked) => setAccessClass(checked ? "executive" : "user")}
+              />
+            </div>
+          ) : null}
           <DialogFooter className="sm:justify-between">
             <Button type="button" variant="destructive" onClick={() => setConfirmingDelete(true)}>Delete project</Button>
             <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>

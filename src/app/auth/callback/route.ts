@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeRole, sessionAccess } from "@/lib/access/access";
 import { isAllowedEmail } from "@/lib/auth/email";
 import {
   credentialParamsFromEntries,
@@ -84,7 +85,20 @@ export async function POST(request: Request) {
         await supabase.auth.signOut();
         failure = "domain";
       } else {
-        return redirectTo(request.url, plan.decision.next);
+        const { data: access, error: accessError } = await supabase
+          .from("directory")
+          .select("role, revoked_at")
+          .eq("user_id", data.user.id)
+          .maybeSingle();
+        const decision = !accessError && access
+          ? sessionAccess({ role: normalizeRole(access.role), revokedAt: access.revoked_at })
+          : null;
+        if (decision?.state === "removed") {
+          await supabase.auth.signOut({ scope: "global" });
+          failure = "removed";
+        } else {
+          return redirectTo(request.url, plan.decision.next);
+        }
       }
     }
   } catch {

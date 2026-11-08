@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { normalizeRole, sessionAccess } from "@/lib/access/access";
 import { isAllowedEmail } from "@/lib/auth/email";
 import { readPublicSupabaseEnv } from "@/lib/env";
 
@@ -81,6 +82,31 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/auth/rejected";
     url.search = "";
     return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
+  }
+
+  if (userId) {
+    const { data: access, error: accessError } = await supabase
+      .from("directory")
+      .select("role, revoked_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const removed = !accessError
+      && access
+      && sessionAccess({ role: normalizeRole(access.role), revokedAt: access.revoked_at }).state === "removed";
+    if (removed) {
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        // The local cookies are still cleared below when sign-out wrote them.
+      }
+      if (!isLogin && !isAuthRoute) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/login";
+        url.search = "";
+        url.searchParams.set("error", "removed");
+        return finish(copySession(supabaseResponse, NextResponse.redirect(url)));
+      }
+    }
   }
 
   if (!userId && !isLogin && !isAuthRoute) {

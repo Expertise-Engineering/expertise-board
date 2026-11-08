@@ -1,6 +1,14 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  canSeeProject,
+  resolveProjectClassChange,
+  resolveProjectClassForWrite,
+  viewerFromRole,
+  type ProjectClass,
+  type Viewer,
+} from "@/lib/access/access";
 import type { Actor, Comment, Project, Status, Task, TaskEventKind } from "@/lib/types";
 import {
   assigneeValue,
@@ -25,6 +33,26 @@ type Db = SupabaseClient;
 
 function fail(error: { message: string } | null): asserts error is null {
   if (error) throw new BoardError(errorMessage(new Error(error.message)));
+}
+
+function viewerFor(actor: Actor): Viewer {
+  if (actor.kind === "agent") return { kind: "agent" };
+  return viewerFromRole(actor.role, null);
+}
+
+async function readVisibleProject(supabase: Db, id: string, actor: Actor): Promise<Project> {
+  if (!isUuid(id)) throw new BoardError("Project id is not a uuid.");
+  const { data, error } = await supabase.from("projects").select("*").eq("id", id).maybeSingle();
+  fail(error);
+  const project = (data as Project | null) ?? null;
+  if (!project || !isProjectClass(project.access_class) || !canSeeProject(viewerFor(actor), project.access_class)) {
+    throw new BoardError("Project not found.");
+  }
+  return project;
+}
+
+function isProjectClass(value: unknown): value is ProjectClass {
+  return value === "executive" || value === "user";
 }
 
 function actorIds(actor: Actor) {
@@ -55,12 +83,18 @@ async function logEvent(
   fail(error);
 }
 
-async function readTask(supabase: Db, id: string): Promise<Task> {
+async function readTask(supabase: Db, id: string, actor: Actor): Promise<Task> {
   if (!isUuid(id)) throw new BoardError("Task id is not a uuid.");
   const { data, error } = await supabase.from("tasks").select("*").eq("id", id).maybeSingle();
   fail(error);
   if (!data) throw new BoardError("Task not found.");
-  return data as Task;
+  const task = data as Task;
+  const project = await readVisibleProject(supabase, task.project_id, actor).catch((error: unknown) => {
+    if (error instanceof BoardError) throw new BoardError("Task not found.");
+    throw error;
+  });
+  if (project.id !== task.project_id) throw new BoardError("Task not found.");
+  return task;
 }
 
 function assertAgentMayChangeStatus(actor: Actor, existing: Task, status: Status) {
@@ -76,9 +110,10 @@ function assertAgentMayChangeStatus(actor: Actor, existing: Task, status: Status
 export async function createProject(
   supabase: Db,
   actor: Actor,
-  input: { name: string; description?: string },
+  input: { name: string; description?: string; accessClass?: ProjectClass },
 ): Promise<Project> {
-  if (actor.kind !== "user") throw new BoardError("Only people can create projects.");
+  const classResult = resolveProjectClassForWrite(viewerFor(actor), input.accessClass);
+  if (!classResult.ok) throw new BoardError(classResult.error);
   const name = input.name.trim();
   if (!name || name.length > 120) throw new BoardError("Give the project a name of 120 characters or fewer.");
   const description = input.description?.trim() ?? "";
@@ -93,6 +128,7 @@ export async function createProject(
       name,
       slug,
       description,
+      access_class: classResult.accessClass,
       sort_order: sortOrder,
       created_by: actor.id,
     })
@@ -104,22 +140,49 @@ export async function createProject(
 
 export async function updateProject(
   supabase: Db,
-  input: { id: string; name: string; description: string },
+  actor: Actor,
+  input: { id: string; name: string; description: string; accessClass?: ProjectClass },
 ): Promise<Project> {
+  const existing = await readVisibleProject(supabase, input.id, actor);
+  const classResult = resolveProjectClassChange(viewerFor(actor), existing.access_class, input.accessClass);
+  if (!classResult.ok) throw new BoardError(classResult.error);
   const name = input.name.trim();
   if (!name || name.length > 120) throw new BoardError("Give the project a name of 120 characters or fewer.");
   const { data, error } = await supabase
     .from("projects")
-    .update({ name, description: input.description.trim() })
-    .eq("id", input.id)
+    .update({
+      name,
+      description: input.description.trim(),
+      access_class: classResult.accessClass,
+    })
+    .eq("id", existing.id)
     .select("*")
     .single();
   fail(error);
   return data as Project;
 }
 
-export async function deleteProject(supabase: Db, id: string) {
-  const { error } = await supabase.from("projects").delete().eq("id", id);
+export async function setProjectClass(
+  supabase: Db,
+  actor: Actor,
+  input: { id: string; accessClass: ProjectClass },
+): Promise<Project> {
+  const existing = await readVisibleProject(supabase, input.id, actor);
+  const classResult = resolveProjectClassChange(viewerFor(actor), existing.access_class, input.accessClass);
+  if (!classResult.ok) throw new BoardError(classResult.error);
+  const { data, error } = await supabase
+    .from("projects")
+    .update({ access_class: classResult.accessClass })
+    .eq("id", existing.id)
+    .select("*")
+    .single();
+  fail(error);
+  return data as Project;
+}
+
+export async function deleteProject(supabase: Db, actor: Actor, id: string) {
+  const existing = await readVisibleProject(supabase, id, actor);
+  const { error } = await supabase.from("projects").delete().eq("id", existing.id);
   fail(error);
 }
 
@@ -153,6 +216,7 @@ export async function createTask(
     position?: number;
   },
 ): Promise<Task> {
+  await readVisibleProject(supabase, input.projectId, actor);
   const title = input.title.trim();
   if (!title || title.length > 200) throw new BoardError("Task title must be 1–200 characters.");
   const status = input.status ?? "todo";
@@ -229,7 +293,11 @@ export async function updateTask(
     position?: number;
   },
 ): Promise<Task> {
-  const existing = await readTask(supabase, input.id);
+  const extra = input as { projectId?: unknown; project_id?: unknown; accessClass?: unknown };
+  if (extra.projectId !== undefined || extra.project_id !== undefined || extra.accessClass !== undefined) {
+    throw new BoardError("A task cannot change project.");
+  }
+  const existing = await readTask(supabase, input.id, actor);
   const title = input.title !== undefined ? input.title.trim() : existing.title;
   if (!title || title.length > 200) throw new BoardError("Task title must be 1–200 characters.");
   const description = input.description !== undefined ? input.description.trim() : existing.description;
@@ -316,8 +384,9 @@ export async function updateTask(
   return task;
 }
 
-export async function deleteTask(supabase: Db, id: string) {
-  const { error } = await supabase.from("tasks").delete().eq("id", id);
+export async function deleteTask(supabase: Db, actor: Actor, id: string) {
+  const existing = await readTask(supabase, id, actor);
+  const { error } = await supabase.from("tasks").delete().eq("id", existing.id);
   fail(error);
 }
 
@@ -328,7 +397,7 @@ export async function addComment(
 ): Promise<Comment> {
   const body = input.body.trim();
   if (!body || body.length > 8000) throw new BoardError("Write a comment of 8000 characters or fewer.");
-  await readTask(supabase, input.taskId);
+  await readTask(supabase, input.taskId, actor);
   const { data, error } = await supabase
     .from("comments")
     .insert({
@@ -350,8 +419,8 @@ export async function addComment(
   return comment;
 }
 
-export async function setDependencies(supabase: Db, taskId: string, waitsOnIds: string[]) {
-  const task = await readTask(supabase, taskId);
+export async function setDependencies(supabase: Db, actor: Actor, taskId: string, waitsOnIds: string[]) {
+  const task = await readTask(supabase, taskId, actor);
   const unique = [...new Set(waitsOnIds.filter((id) => id && id !== taskId))];
   for (const id of unique) {
     if (!isUuid(id)) throw new BoardError("A dependency id is not a uuid.");
@@ -379,12 +448,15 @@ export async function setDependencies(supabase: Db, taskId: string, waitsOnIds: 
   fail(touchError);
 }
 
-export async function resolveProject(supabase: Db, project: string): Promise<Project> {
+export async function resolveProject(supabase: Db, actor: Actor, project: string): Promise<Project> {
   const query = supabase.from("projects").select("*");
   const { data, error } = isUuid(project)
     ? await query.eq("id", project).maybeSingle()
     : await query.eq("slug", project).maybeSingle();
   fail(error);
-  if (!data) throw new BoardError(`No project matches "${project}".`);
-  return data as Project;
+  const row = (data as Project | null) ?? null;
+  if (!row || !isProjectClass(row.access_class) || !canSeeProject(viewerFor(actor), row.access_class)) {
+    throw new BoardError(`No project matches "${project}".`);
+  }
+  return row;
 }

@@ -7,6 +7,7 @@ import { safeNextPath } from "./email.ts";
 
 export const LOGIN_ERROR_MESSAGES = {
   domain: "Only @exp-eng.com addresses can use this board. That sign-in was stopped.",
+  removed: "This account was removed from Expertise Board. An executive has to restore it before you can sign in.",
   auth: "That magic link could not be confirmed. Request a new one.",
   expired: "That magic link has expired or was already used. Request a new one.",
   pkce: "That link has to be confirmed in the browser that requested it. Request a new one and open it there.",
@@ -56,6 +57,7 @@ export function loginErrorMessage(code: string | null | undefined): string | nul
 export function loginErrorForAuthFailure(error: { code?: string | null; message?: string | null }): LoginErrorCode {
   const code = error.code?.trim().toLowerCase() ?? "";
   const message = error.message ?? "";
+  if (/removed from expertise board/i.test(message)) return "removed";
   if (EXPIRED_ERROR_CODES.has(code) || /expired|one-time token not found|already been used/i.test(message)) {
     return "expired";
   }
