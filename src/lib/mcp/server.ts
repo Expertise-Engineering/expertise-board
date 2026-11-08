@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { hashApiKey } from "@/lib/agents/keys";
+import { canSeeProject } from "@/lib/access/access";
 import { isWaiting } from "@/lib/board/filters";
 import { BoardError, addComment, createTask, resolveProject, updateTask } from "@/lib/board/mutate";
 import { errorMessage, isStatus, isUuid, parseAssignee } from "@/lib/board/text";
@@ -111,7 +112,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
     "list_projects",
     {
       title: "List projects",
-      description: "List every customer or job project on Expertise Board.",
+      description: "List every regular customer or job project. Executive projects are not visible to agents.",
       inputSchema: {},
     },
     async () => {
@@ -119,10 +120,21 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
         const supabase = createServiceClient();
         const { data, error } = await supabase
           .from("projects")
-          .select("id, name, slug, description, sort_order, created_at")
+          .select("id, name, slug, description, access_class, sort_order, created_at")
+          .eq("access_class", "user")
           .order("sort_order", { ascending: true });
         if (error) return failure(error);
-        return text({ projects: data ?? [] });
+        const projects = ((data ?? []) as Project[]).filter((project) => canSeeProject(actor, project.access_class));
+        return text({
+          projects: projects.map((project) => ({
+            id: project.id,
+            name: project.name,
+            slug: project.slug,
+            description: project.description,
+            sort_order: project.sort_order,
+            created_at: project.created_at,
+          })),
+        });
       } catch (error) {
         return failure(error);
       }
@@ -149,11 +161,21 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
         const supabase = createServiceClient();
         let projectId: string | null = null;
         if (args.project) {
-          projectId = (await resolveProject(supabase, args.project)).id;
+          projectId = (await resolveProject(supabase, actor, args.project)).id;
         }
+        let visibleProjects = projectId ? [projectId] : [];
+        if (!projectId) {
+          const { data: projectRows, error: projectError } = await supabase
+            .from("projects")
+            .select("id")
+            .eq("access_class", "user");
+          if (projectError) return failure(projectError);
+          visibleProjects = (projectRows ?? []).map((row) => row.id as string);
+        }
+        if (visibleProjects.length === 0) return text({ tasks: [] });
         let assignee = args.assignee;
         if (assignee === "me") assignee = `agent:${agent.id}`;
-        let query = supabase.from("tasks").select("*").limit(300);
+        let query = supabase.from("tasks").select("*").in("project_id", visibleProjects).limit(300);
         if (projectId) query = query.eq("project_id", projectId);
         if (args.status) query = query.eq("status", args.status);
         if (typeof args.is_human === "boolean") query = query.eq("is_human", args.is_human);
@@ -175,10 +197,15 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
           );
         }
         const projects = await projectMap(supabase, tasks);
-        const dependencies = await dependenciesFor(supabase, tasks.map((task) => task.id));
-        const blockers = await loadTasks(
-          supabase,
-          [...new Set(dependencies.map((dependency) => dependency.waits_on_task_id))],
+        const visibleIds = new Set(
+          [...projects.values()].filter((project) => canSeeProject(actor, project.access_class)).map((project) => project.id),
+        );
+        tasks = tasks.filter((task) => visibleIds.has(task.project_id));
+        const dependencies = (await dependenciesFor(supabase, tasks.map((task) => task.id))).filter((dependency) =>
+          tasks.some((task) => task.id === dependency.waits_on_task_id),
+        );
+        const blockers = tasks.filter((task) =>
+          dependencies.some((dependency) => dependency.waits_on_task_id === task.id),
         );
         const known = [...tasks, ...blockers];
         return text({
@@ -211,7 +238,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
           if (error) return failure(error);
           task = (data as Task | null) ?? null;
         } else if (args.project && args.number) {
-          const project = await resolveProject(supabase, args.project);
+          const project = await resolveProject(supabase, actor, args.project);
           const { data, error } = await supabase
             .from("tasks")
             .select("*")
@@ -224,20 +251,25 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
           return text("Pass task_id, or project and number.", true);
         }
         if (!task) return text("Task not found.", true);
-        const [projects, dependencies, commentsResult, eventsResult] = await Promise.all([
-          projectMap(supabase, [task]),
+        const projects = await projectMap(supabase, [task]);
+        const project = projects.get(task.project_id);
+        if (!project || !canSeeProject(actor, project.access_class)) return text("Task not found.", true);
+        const [dependencies, commentsResult, eventsResult] = await Promise.all([
           dependenciesFor(supabase, [task.id]),
           supabase.from("comments").select("*").eq("task_id", task.id).order("created_at", { ascending: true }),
           supabase.from("task_events").select("*").eq("task_id", task.id).order("created_at", { ascending: true }),
         ]);
         if (commentsResult.error) return failure(commentsResult.error);
         if (eventsResult.error) return failure(eventsResult.error);
-        const blockers = await loadTasks(
+        const blockers = (await loadTasks(
           supabase,
           dependencies.map((dependency) => dependency.waits_on_task_id),
+        )).filter((blocker) => blocker.project_id === task.project_id);
+        const visibleDependencies = dependencies.filter((dependency) =>
+          blockers.some((blocker) => blocker.id === dependency.waits_on_task_id),
         );
         return text({
-          task: presentTask(task, projects, dependencies, [task, ...blockers]),
+          task: presentTask(task, projects, visibleDependencies, [task, ...blockers]),
           comments: commentsResult.data ?? [],
           events: eventsResult.data ?? [],
         });
@@ -267,7 +299,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
     async (args) => {
       try {
         const supabase = createServiceClient();
-        const project = await resolveProject(supabase, args.project);
+        const project = await resolveProject(supabase, actor, args.project);
         const assignee = args.assignee === "me" ? `agent:${agent.id}` : args.assignee;
         const status = args.status && isStatus(args.status) ? (args.status as Status) : "todo";
         const task = await createTask(supabase, actor, {
@@ -353,7 +385,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
     {
       title: "Take the next task",
       description:
-        "Claim the next Todo task that is not in Backlog, not marked human, not assigned to someone else, and not waiting on unfinished work. Moves it to Doing, assigns it to this agent, and comments that the agent took it. Optional project slug or id limits the search.",
+        "Claim the next regular-project Todo task that is not in Backlog, not marked human, not assigned to someone else, and not waiting on unfinished work. Executive projects are skipped. Moves it to Doing, assigns it to this agent, and comments that the agent took it. Optional project slug or id limits the search.",
       inputSchema: {
         project: z.string().optional().describe("Optional project slug or id"),
       },
@@ -362,7 +394,7 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
       try {
         const supabase = createServiceClient();
         let projectId: string | null = null;
-        if (args.project) projectId = (await resolveProject(supabase, args.project)).id;
+        if (args.project) projectId = (await resolveProject(supabase, actor, args.project)).id;
         const { data, error } = await supabase.rpc("claim_next_task", {
           p_agent_id: agent.id,
           p_project_id: projectId,
@@ -376,6 +408,13 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
         }
         const task = data as Task;
         const projects = await projectMap(supabase, [task]);
+        const project = projects.get(task.project_id);
+        if (!project || !canSeeProject(actor, project.access_class)) {
+          return text({
+            task: null,
+            message: "No ready task. Backlog, human tasks, executive projects, and tasks waiting on unfinished work were skipped.",
+          });
+        }
         return text({
           task: presentTask(task, projects, [], [task]),
           message: "Took this task and moved it to Doing.",

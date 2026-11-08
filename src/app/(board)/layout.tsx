@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/shell/app-shell";
 import { MissingProfile, SetupGuide } from "@/components/setup-guide";
+import { viewerFromRole, visibleWorkspace } from "@/lib/access/access";
 import { getSessionUser } from "@/lib/auth/session";
 import { loadDirectory } from "@/lib/board/load";
 
@@ -16,11 +17,20 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 async function Frame({ children }: { children: React.ReactNode }) {
   const session = await getSessionUser();
   if (!session.configured) return <SetupGuide />;
+  if (session.removed) redirect("/auth/removed");
   if (!session.user) redirect("/login");
   const directory = await loadDirectory(session.user.id);
   if (!directory.profile) return <MissingProfile email={session.user.email} />;
+  if (directory.profile.revoked_at) redirect("/auth/removed");
+  const viewer = viewerFromRole(directory.profile.role, directory.profile.revoked_at);
+  const projects = visibleWorkspace({
+    viewer,
+    projects: directory.projects,
+    tasks: [],
+    dependencies: [],
+  }).projects;
   return (
-    <AppShell directory={{ ...directory, profile: directory.profile }}>
+    <AppShell directory={{ ...directory, profile: directory.profile, projects }}>
       {children}
     </AppShell>
   );

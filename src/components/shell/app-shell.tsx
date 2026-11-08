@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Bot, LogOut, Menu, Plus } from "lucide-react";
+import { Bot, LogOut, Menu, Plus, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { updateDisplayName, signOut } from "@/actions/account";
 import { createProjectAction } from "@/actions/board";
 import { BoardProvider, useBoard, type Directory } from "@/components/shell/board-context";
+import { realtimeSubscriptions, viewerFromRole, type ProjectClass } from "@/lib/access/access";
 import { readPublicSupabaseEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 export function AppShell({ directory, children }: { directory: Directory; children: React.ReactNode }) {
@@ -39,6 +41,7 @@ export function AppShell({ directory, children }: { directory: Directory; childr
     setNavOpen(false);
   }
 
+  const subscriptionKey = `${directory.profile.role}:${directory.profile.revoked_at ?? ""}:${directory.projects.map((project) => project.id).join(",")}`;
   useEffect(() => {
     if (!readPublicSupabaseEnv()) return;
     const supabase = createClient();
@@ -47,21 +50,29 @@ export function AppShell({ directory, children }: { directory: Directory; childr
       window.clearTimeout(timer);
       timer = window.setTimeout(() => router.refresh(), 300);
     };
-    const channel = supabase
-      .channel("expertise-board")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_events" }, refresh)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") setLive("live");
-        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setLive("offline");
-      });
+    const viewer = viewerFromRole(directory.profile.role, directory.profile.revoked_at);
+    let channel = supabase.channel("expertise-board");
+    for (const subscription of realtimeSubscriptions(viewer, directory.projects.map((project) => project.id))) {
+      channel = channel.on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: subscription.table,
+          ...(subscription.filter ? { filter: subscription.filter } : {}),
+        },
+        refresh,
+      );
+    }
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") setLive("live");
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setLive("offline");
+    });
     return () => {
       window.clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [router, subscriptionKey, directory.profile.role, directory.profile.revoked_at, directory.projects]);
 
   const contextValue = useMemo(
     () => ({ ...directory, openNewProject: () => setProjectOpen(true) }),
@@ -171,6 +182,9 @@ function SidebarBody({
                     className={`block rounded-lg px-2 py-2 text-sm ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/70"}`}
                   >
                     <span className="block font-medium">{project.name}</span>
+                    {project.access_class === "executive" ? (
+                      <span className="mt-0.5 block text-[10px] tracking-wide text-sidebar-foreground/60 uppercase">Executive</span>
+                    ) : null}
                     {project.description ? (
                       <span className="mt-0.5 block truncate text-xs text-sidebar-foreground/65">{project.description}</span>
                     ) : null}
@@ -182,6 +196,16 @@ function SidebarBody({
         )}
       </nav>
       <div className="border-t border-sidebar-border p-3">
+        {profile.role === "executive" ? (
+          <Link
+            href="/admin"
+            aria-current={pathname === "/admin" ? "page" : undefined}
+            className={`mb-1 flex items-center gap-2 rounded-lg px-2 py-2 text-sm ${pathname === "/admin" ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/70"}`}
+          >
+            <Shield className="size-4" />
+            Admin
+          </Link>
+        ) : null}
         <Link
           href="/agents"
           aria-current={pathname === "/agents" ? "page" : undefined}
@@ -226,20 +250,32 @@ function LiveDot({
 
 function ProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const router = useRouter();
+  const { profile } = useBoard();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [accessClass, setAccessClass] = useState<ProjectClass>("user");
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setAccessClass("user");
+  }
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     startTransition(async () => {
-      const result = await createProjectAction({ name, description });
+      const result = await createProjectAction({
+        name,
+        description,
+        accessClass: profile.role === "executive" ? accessClass : "user",
+      });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
       setName("");
       setDescription("");
+      setAccessClass("user");
       onOpenChange(false);
       router.push(`/projects/${result.data.slug}`);
       router.refresh();
@@ -262,6 +298,19 @@ function ProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             <Label htmlFor="project-description">Description</Label>
             <Textarea id="project-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
           </div>
+          {profile.role === "executive" ? (
+            <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+              <div>
+                <Label htmlFor="project-class">Executive project</Label>
+                <p className="text-xs text-muted-foreground">Regular teammates and agents cannot see it.</p>
+              </div>
+              <Switch
+                id="project-class"
+                checked={accessClass === "executive"}
+                onCheckedChange={(checked) => setAccessClass(checked ? "executive" : "user")}
+              />
+            </div>
+          ) : null}
           <DialogFooter>
             <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create project"}</Button>
           </DialogFooter>

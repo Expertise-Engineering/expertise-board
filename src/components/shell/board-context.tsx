@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Agent, Profile, Project } from "@/lib/types";
+import type { Agent, Profile, Project, SessionProfile } from "@/lib/types";
 
 export type Directory = {
-  profile: Profile;
+  profile: SessionProfile;
   profiles: Profile[];
   agents: Agent[];
   projects: Project[];

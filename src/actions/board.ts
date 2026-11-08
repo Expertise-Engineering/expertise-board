@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/auth/session";
+import type { ProjectClass } from "@/lib/access/access";
 import {
   addComment,
   createProject,
@@ -9,6 +10,7 @@ import {
   deleteProject,
   deleteTask,
   setDependencies,
+  setProjectClass,
   updateProject,
   updateTask,
 } from "@/lib/board/mutate";
@@ -34,6 +36,7 @@ async function run<T>(work: () => Promise<T>): Promise<ActionResult<T>> {
 export async function createProjectAction(input: {
   name: string;
   description: string;
+  accessClass?: ProjectClass;
 }): Promise<ActionResult<Project>> {
   return run(async () => {
     const { supabase, actor } = await requireActor();
@@ -45,17 +48,28 @@ export async function updateProjectAction(input: {
   id: string;
   name: string;
   description: string;
+  accessClass?: ProjectClass;
 }): Promise<ActionResult<Project>> {
   return run(async () => {
-    const { supabase } = await requireActor();
-    return updateProject(supabase, input);
+    const { supabase, actor } = await requireActor();
+    return updateProject(supabase, actor, input);
+  });
+}
+
+export async function setProjectClassAction(input: {
+  id: string;
+  accessClass: ProjectClass;
+}): Promise<ActionResult<Project>> {
+  return run(async () => {
+    const { supabase, actor } = await requireActor();
+    return setProjectClass(supabase, actor, input);
   });
 }
 
 export async function deleteProjectAction(id: string): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
-    const { supabase } = await requireActor();
-    await deleteProject(supabase, id);
+    const { supabase, actor } = await requireActor();
+    await deleteProject(supabase, actor, id);
     return { id };
   });
 }
@@ -102,7 +116,7 @@ export async function updateTaskAction(input: {
       url: input.url,
       tags: input.tags.split(","),
     });
-    await setDependencies(supabase, task.id, input.waitsOn);
+    await setDependencies(supabase, actor, task.id, input.waitsOn);
     return task;
   });
 }
@@ -122,8 +136,8 @@ export async function patchTaskAction(input: {
 
 export async function deleteTaskAction(id: string): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
-    const { supabase } = await requireActor();
-    await deleteTask(supabase, id);
+    const { supabase, actor } = await requireActor();
+    await deleteTask(supabase, actor, id);
     return { id };
   });
 }
