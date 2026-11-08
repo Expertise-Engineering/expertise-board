@@ -1,0 +1,15 @@
+# Next.js on Netlify uses the @netlify/next runtime, which Netlify installs
+# when it detects this app. A separate @netlify/plugin-nextjs entry is not required.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
