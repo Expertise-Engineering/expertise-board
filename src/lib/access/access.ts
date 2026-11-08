@@ -31,11 +31,22 @@ export type DirectoryPlan =
   | { ok: false; error: string };
 
 export type RealtimeSubscription = {
-  table: "tasks" | "comments" | "projects" | "task_events";
+  table: "board_ticks";
   filter?: string;
 };
 
-const REALTIME_NONE = "00000000-0000-0000-0000-000000000000";
+/**
+ * Missing directory stays a regular user. A revoked row is removed.
+ * Decisions that must not trust a JWT alone should load the directory after getUser().
+ */
+export function directoryRoleForSession(
+  row: { role: AccessRole; revokedAt: string | null } | null,
+): { removed: true } | { removed: false; role: AccessRole } {
+  const decision = sessionAccess(row);
+  if (decision.state === "removed") return { removed: true };
+  if (decision.state === "active") return { removed: false, role: decision.role };
+  return { removed: false, role: "user" };
+}
 
 export function isAccessRole(value: unknown): value is AccessRole {
   return value === "executive" || value === "user";
@@ -69,8 +80,8 @@ export function personStatus(person: { userId: string | null; revokedAt: string 
 }
 
 /**
- * A signed-in person may use the board only when directory has an active row.
- * Missing means the account has no access row yet. Removed is a hard stop.
+ * Directory lookup result. Missing is not removed: a company email with no row
+ * is still a regular user. Callers that sign someone in use directoryRoleForSession.
  */
 export function sessionAccess(
   row: { role: AccessRole; revokedAt: string | null } | null,
@@ -161,27 +172,13 @@ export function taskMoveWrite(
 }
 
 /**
- * Realtime DELETE events skip row security, so regular clients subscribe with
- * a project filter. Executives listen to every row they are allowed to see.
+ * Live updates are a clock row, not the task body. Regular members subscribe to
+ * the regular tick. Row security hides the executive tick from them.
  */
-export function realtimeSubscriptions(viewer: Viewer, projectIds: readonly string[]): RealtimeSubscription[] {
-  if (viewer.kind === "executive") {
-    return [
-      { table: "tasks" },
-      { table: "comments" },
-      { table: "projects" },
-      { table: "task_events" },
-    ];
-  }
-  const ids = projectIds.filter((id) => id.length > 0);
-  const taskFilter = ids.length > 0 ? `project_id=in.(${ids.join(",")})` : `project_id=eq.${REALTIME_NONE}`;
-  const projectFilter = viewer.kind === "user" ? "access_class=eq.user" : `id=eq.${REALTIME_NONE}`;
-  return [
-    { table: "projects", filter: projectFilter },
-    { table: "tasks", filter: taskFilter },
-    { table: "comments", filter: taskFilter },
-    { table: "task_events", filter: taskFilter },
-  ];
+export function realtimeSubscriptions(viewer: Viewer): RealtimeSubscription[] {
+  if (viewer.kind === "executive") return [{ table: "board_ticks" }];
+  if (viewer.kind === "user") return [{ table: "board_ticks", filter: "scope=eq.regular" }];
+  return [{ table: "board_ticks", filter: "scope=eq.none" }];
 }
 
 export function activeExecutiveCount(people: readonly DirectoryRecord[]): number {

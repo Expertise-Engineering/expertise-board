@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { connection } from "next/server";
-import { readPublicSupabaseEnv, readServiceRoleKey } from "@/lib/env";
+import { readServiceRoleKey } from "@/lib/env-server";
+import { readPublicSupabaseEnv } from "@/lib/env";
 import { authenticateAgent, createExpertiseMcpServer } from "@/lib/mcp/server";
 
 const CORS_HEADERS: Record<string, string> = {

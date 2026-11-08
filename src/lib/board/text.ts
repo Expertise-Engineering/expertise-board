@@ -104,21 +104,52 @@ export function formatStamp(value: string): string {
   return `${day} ${monthName} ${year}, ${hour}:${minute} UTC`;
 }
 
+/**
+ * Build a PostgREST `or` filter that matches any column with ilike.
+ * The value is quoted and `%`, `_`, and `\` are escaped so the filter stays one clause.
+ */
+export function postgrestIlikeOr(columns: readonly string[], raw: string): string | null {
+  const cleaned = raw.replace(/["(),]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  const escaped = cleaned.replace(/\\/g, "\\\\").replace(/[%_]/g, (char) => `\\${char}`);
+  const pattern = `"%${escaped}%"`;
+  return columns.map((column) => `${column}.ilike.${pattern}`).join(",");
+}
+
 export function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    if (error.message.includes("agents_name_key") || error.message.includes("agents_name_unique")) {
-      return "An agent with that name already exists.";
-    }
-    if (error.message.includes("projects_slug")) {
-      return "A project with that name is already on the board.";
-    }
-    if (error.message.includes("cycle")) {
-      return "That wait would create a cycle.";
-    }
-    if (error.message.includes("same project")) {
-      return "A task can only wait on another task in the same project.";
-    }
-    return error.message;
+  const raw = error instanceof Error ? error.message : "";
+  if (!raw) return "Something went wrong.";
+  const mapped = knownConstraintMessage(raw);
+  if (mapped) {
+    if (mapped !== raw) logDriver(raw);
+    return mapped;
   }
-  return "Something went wrong.";
+  if (looksLikeDriverText(raw)) {
+    logDriver(raw);
+    return "Something went wrong.";
+  }
+  return raw;
+}
+
+function knownConstraintMessage(raw: string): string | null {
+  if (raw.includes("agents_name_key") || raw.includes("agents_name_unique")) {
+    return "An agent with that name already exists.";
+  }
+  if (raw.includes("projects_slug")) return "A project with that name is already on the board.";
+  if (/last executive/i.test(raw)) return "The last executive cannot be demoted or removed.";
+  if (/cycle/i.test(raw)) return "That wait would create a cycle.";
+  if (/same project/i.test(raw)) return "A task can only wait on another task in the same project.";
+  if (/schema cache|could not find the function|does not exist/i.test(raw)) {
+    return "The database schema is not ready. Apply the SQL migrations, then reload.";
+  }
+  if (/row-level security|permission denied|42501/i.test(raw)) return "You do not have access to that.";
+  return null;
+}
+
+function looksLikeDriverText(raw: string): boolean {
+  return /violates|duplicate key|PGRST|syntax error|invalid input|JWT|SQLSTATE|\bat\s+\//i.test(raw);
+}
+
+function logDriver(raw: string) {
+  if (typeof window === "undefined") console.error(raw);
 }

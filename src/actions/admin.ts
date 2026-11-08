@@ -10,7 +10,7 @@ import {
 } from "@/lib/access/access";
 import { requireActor } from "@/lib/auth/session";
 import { loadAccessDirectory } from "@/lib/board/load";
-import { actionError } from "@/lib/http/action-error";
+import { errorMessage } from "@/lib/board/text";
 
 type AdminResult = { ok: true } | { ok: false; error: string };
 
@@ -60,16 +60,17 @@ async function changeDirectory(
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: friendlyAccessError(actionError(error)) };
+    const message = error instanceof Error ? error.message : "";
+    return { ok: false, error: friendlyAccessError(message) };
   }
 }
 
 function friendlyAccessError(message: string): string {
   if (/last executive/i.test(message)) return LAST_EXECUTIVE_ERROR;
-  if (/row-level security|permission denied|not allowed/i.test(message)) {
+  if (/row-level security|permission denied|not allowed|do not have access/i.test(message)) {
     return "Only an executive can change access.";
   }
-  return message;
+  return errorMessage(new Error(message));
 }
 
 export async function addPersonAction(input: { email: string; role: AccessRole }): Promise<AdminResult> {

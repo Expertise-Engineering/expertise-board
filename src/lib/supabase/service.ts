@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
-import { readPublicSupabaseEnv, readServiceRoleKey } from "@/lib/env";
+import { readServiceRoleKey } from "@/lib/env-server";
+import { readPublicSupabaseEnv } from "@/lib/env";
 
 export function createServiceClient() {
   const env = readPublicSupabaseEnv();

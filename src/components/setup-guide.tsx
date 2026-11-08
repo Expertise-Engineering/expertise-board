@@ -17,7 +17,7 @@ export function SetupGuide() {
         </li>
         <li>
           <code className="rounded bg-muted px-1.5 py-0.5">SUPABASE_SERVICE_ROLE_KEY</code>
-          {" stays on the server, for the agent MCP endpoint."}
+          {" stays on the server, for the agent MCP endpoint and for adding an agent."}
         </li>
       </ul>
       <p className="text-sm text-muted-foreground">
