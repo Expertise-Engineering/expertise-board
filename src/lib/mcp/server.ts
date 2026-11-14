@@ -6,7 +6,7 @@ import { z } from "zod";
 import { hashApiKey } from "@/lib/agents/keys";
 import { canSeeProject } from "@/lib/access/access";
 import { isWaiting } from "@/lib/board/filters";
-import { BoardError, addComment, createTask, resolveProject, updateTask } from "@/lib/board/mutate";
+import { BoardError, addComment, createProject, createTask, resolveProject, updateTask } from "@/lib/board/mutate";
 import { errorMessage, isStatus, isUuid, parseAssignee, postgrestIlikeOr } from "@/lib/board/text";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Actor, Agent, Project, Status, Task, TaskDependency } from "@/lib/types";
@@ -134,6 +134,42 @@ export function createExpertiseMcpServer(agent: AgentPrincipal) {
             sort_order: project.sort_order,
             created_at: project.created_at,
           })),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_project",
+    {
+      title: "Create project",
+      description:
+        "Start a new regular project (a customer or job board). Agents can only create regular projects, never executive ones, and the project is stamped with this agent. Fails if a regular project already has this name, ignoring case. Returns the project id and slug to use with create_task.",
+      inputSchema: {
+        name: z.string().describe("Project name, 1 to 120 characters"),
+        description: z.string().optional().describe("Optional short description"),
+      },
+    },
+    async (args) => {
+      try {
+        const supabase = createServiceClient();
+        const project = await createProject(supabase, actor, {
+          name: args.name,
+          description: args.description,
+        });
+        return text({
+          project: {
+            id: project.id,
+            name: project.name,
+            slug: project.slug,
+            description: project.description,
+            access_class: project.access_class,
+            sort_order: project.sort_order,
+            created_by_agent_id: project.created_by_agent_id ?? null,
+            created_at: project.created_at,
+          },
         });
       } catch (error) {
         return failure(error);

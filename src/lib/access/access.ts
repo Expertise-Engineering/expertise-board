@@ -117,7 +117,10 @@ export function resolveProjectClassForWrite(
   requested: ProjectClass | undefined,
 ): { ok: true; accessClass: ProjectClass } | { ok: false; error: string } {
   if (viewer.kind === "agent") {
-    return { ok: false, error: "Only people can create projects." };
+    if (requested === "executive") {
+      return { ok: false, error: "Agents can only create regular projects." };
+    }
+    return { ok: true, accessClass: "user" };
   }
   if (requested === "executive" && viewer.kind !== "executive") {
     return { ok: false, error: "Only an executive can create an executive project." };

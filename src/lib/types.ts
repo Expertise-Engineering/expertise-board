@@ -33,6 +33,7 @@ export type Project = {
   sort_order: number;
   created_at: string;
   created_by: string | null;
+  created_by_agent_id?: string | null;
 };
 
 export type Task = {

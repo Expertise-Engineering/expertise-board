@@ -146,7 +146,12 @@ test("placing or moving a card does not change project or escalate class", () =>
   assert.deepEqual(regularCreate, { ok: true, accessClass: "user" });
   const executiveCreate = resolveProjectClassForWrite({ kind: "executive" }, "executive");
   assert.deepEqual(executiveCreate, { ok: true, accessClass: "executive" });
-  assert.equal(resolveProjectClassForWrite({ kind: "agent" }, "user").ok, false);
+  assert.deepEqual(resolveProjectClassForWrite({ kind: "agent" }, undefined), { ok: true, accessClass: "user" });
+  assert.deepEqual(resolveProjectClassForWrite({ kind: "agent" }, "user"), { ok: true, accessClass: "user" });
+  assert.deepEqual(resolveProjectClassForWrite({ kind: "agent" }, "executive"), {
+    ok: false,
+    error: "Agents can only create regular projects.",
+  });
 
   const escalated = resolveProjectClassChange({ kind: "user" }, "user", "executive");
   assert.equal(escalated.ok, false);
@@ -154,6 +159,10 @@ test("placing or moving a card does not change project or escalate class", () =>
   assert.deepEqual(untouched, { ok: true, accessClass: "user" });
   const marked = resolveProjectClassChange({ kind: "executive" }, "user", "executive");
   assert.deepEqual(marked, { ok: true, accessClass: "executive" });
+  const agentEscalated = resolveProjectClassChange({ kind: "agent" }, "user", "executive");
+  assert.equal(agentEscalated.ok, false);
+  const agentUntouched = resolveProjectClassChange({ kind: "agent" }, "user", undefined);
+  assert.deepEqual(agentUntouched, { ok: true, accessClass: "user" });
 });
 
 test("open company signup is regular, and removal blocks the next sign-in", () => {
