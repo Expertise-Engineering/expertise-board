@@ -54,6 +54,18 @@ function isProjectClass(value: unknown): value is ProjectClass {
   return value === "executive" || value === "user";
 }
 
+function agentCreatedProject(value: unknown, agentId: string): Project {
+  if (!value || typeof value !== "object") throw new BoardError("The project was not created.");
+  const row = value as Project;
+  if (typeof row.id !== "string" || typeof row.slug !== "string" || typeof row.name !== "string") {
+    throw new BoardError("The project was not created.");
+  }
+  if (row.access_class !== "user" || row.created_by_agent_id?.toLowerCase() !== agentId.toLowerCase()) {
+    throw new BoardError("Agents can only create regular projects.");
+  }
+  return row;
+}
+
 function writer(actor: Actor) {
   return {
     p_agent_id: actor.kind === "agent" ? actor.id : null,
@@ -95,6 +107,16 @@ export async function createProject(
   const name = input.name.trim();
   if (!name || name.length > 120) throw new BoardError("Give the project a name of 120 characters or fewer.");
   const description = input.description?.trim() ?? "";
+  if (actor.kind === "agent") {
+    if (description.length > 20000) throw new BoardError("Description is too long.");
+    const { data, error } = await supabase.rpc("create_agent_project", {
+      p_agent_id: actor.id,
+      p_name: name,
+      p_description: description,
+    });
+    fail(error);
+    return agentCreatedProject(data, actor.id);
+  }
   const { data: existing, error: existingError } = await supabase.from("projects").select("slug, sort_order");
   fail(existingError);
   const rows = (existing ?? []) as { slug: string; sort_order: number }[];

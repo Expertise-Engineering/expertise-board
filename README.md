@@ -50,7 +50,7 @@ SQL lives in [`supabase/migrations`](supabase/migrations). Apply every file, in 
 supabase db push
 ```
 
-`20261108001000_initial_schema.sql` creates the board. `20261108180000_access_classes.sql` adds roles, project class, and the stricter row policies. `20261108200000_access_hardening.sql` binds authors to the session, keeps agent key hashes off the Data API, and checks the JWT role instead of `session_user`. Apply all three, in order. The access migration is safe to run when Cory's auth user is not in the database yet: it still records `cm@exp-eng.com` as an executive, and the signup trigger keeps that role when the account appears.
+`20261108001000_initial_schema.sql` creates the board. `20261108180000_access_classes.sql` adds roles, project class, and the stricter row policies. `20261108200000_access_hardening.sql` binds authors to the session, keeps agent key hashes off the Data API, and checks the JWT role instead of `session_user`. `20261114090000_agents_create_projects.sql` lets an agent start a regular project and stamps `created_by_agent_id`. `20261114103000_agent_project_name_and_slug.sql` rejects a second regular project with the same name and keeps a hidden executive slug from being returned as `name-2`. Apply every file, in order. The access migration is safe to run when Cory's auth user is not in the database yet: it still records `cm@exp-eng.com` as an executive, and the signup trigger keeps that role when the account appears.
 
 The initial migration:
 
@@ -71,7 +71,7 @@ Role and removed status live in `public.directory`, keyed by email. `profiles.ro
 - An executive can see every project and task, change a project's class, and open **Admin**.
 - A regular teammate can see and work on every regular project. They cannot open Admin or an executive project. A direct link to an executive project is a not-found page, including its tasks, comments, and waits-on links.
 - Projects that already exist, and projects someone creates, are regular unless an executive marks them executive. A regular user cannot create an executive project or change a project's class. Moving a card does not change which project it belongs to.
-- Agents are not executives. They have no admin access. `list_projects`, `list_tasks`, `get_task`, and `claim_next_task` only see regular projects. Agents still cannot take Backlog cards or cards marked human.
+- Agents are not executives. They have no admin access. `list_projects`, `list_tasks`, `get_task`, and `claim_next_task` only see regular projects. Agents can start new regular projects with `create_project` (stamped with the agent, never executive). A regular project with the same name, ignoring case, is rejected. Agents still cannot take Backlog cards or cards marked human.
 - Anyone with an `@exp-eng.com` email can still sign in. If they are not already on the directory, the signup trigger adds them as a regular user.
 - **Admin** (executives only) lists people and projects. Add an email and a role before that person signs in, change a role, or remove someone. Remove is reversible: it sets `revoked_at` and keeps their history. Their next request is signed out, and the company-email rule will not let them back in until an executive restores them.
 - The last active executive cannot be demoted or removed.
@@ -144,6 +144,7 @@ Tools:
 | Tool | What it does |
 | --- | --- |
 | `list_projects` | Every regular project. Executive projects are omitted |
+| `create_project` | Start a regular project (`name`, optional `description`). Stamped with this agent. Never executive. Fails if a regular project already has that name, ignoring case |
 | `list_tasks` | Filter by project, status, tag, `is_human`, assignee (`user:<uuid>`, `agent:<uuid>`, `me`, `unassigned`), and text. Executive projects are omitted |
 | `get_task` | One task by id, or by project plus number, with comments and events |
 | `create_task` | Create a task. Agents cannot create Backlog cards |

@@ -93,3 +93,53 @@ test("agent task rules, atomic writes, ticks, and deletion history are in SQL", 
   assert.match(sql, /before delete on public\.projects/i);
   assert.match(sql, /before delete on public\.tasks/i);
 });
+
+test("agents create only regular projects, stamped by the database", () => {
+  const applied = readFileSync(
+    join(root, "supabase/migrations/20261114090000_agents_create_projects.sql"),
+    "utf8",
+  );
+  assert.match(applied, /add column created_by_agent_id uuid references public\.agents/i);
+  assert.match(applied, /Agents can only create regular projects/i);
+  assert.match(applied, /new\.created_by := null/);
+  assert.match(applied, /new\.created_by_agent_id := agent/);
+  assert.match(applied, /new\.access_class is distinct from 'user'/);
+  assert.match(applied, /security invoker/);
+  assert.match(applied, /values \(cleaned, base, btrim\(coalesce\(p_description, ''\)\), 'user'\)/);
+  assert.match(applied, /grant execute on function public\.create_agent_project\(uuid, text, text\) to service_role/i);
+  assert.doesNotMatch(applied, /to authenticated/i);
+  assert.doesNotMatch(applied, /pg_advisory_xact_lock/);
+});
+
+test("agent creates hide executive slugs and reject duplicate regular names", () => {
+  const follow = readFileSync(
+    join(root, "supabase/migrations/20261114103000_agent_project_name_and_slug.sql"),
+    "utf8",
+  );
+  assert.match(follow, /security definer/);
+  assert.match(follow, /set search_path = ''/);
+  assert.match(
+    follow,
+    /regular_member := api_role = 'service_role'\s+or \(api_role = 'authenticated' and not coalesce\(private\.is_executive\(\), false\)\);/,
+  );
+  assert.match(follow, /pg_catalog\.pg_advisory_xact_lock\(pg_catalog\.hashtextextended\(name_key, 0\)\)/);
+  assert.match(
+    follow,
+    /projects\.access_class = 'user'\s+and pg_catalog\.lower\(pg_catalog\.btrim\(projects\.name\)\) = name_key/,
+  );
+  assert.match(follow, /A hidden executive slug must not surface as base-2/);
+  assert.match(follow, /A project named "%s" already exists \(slug %s\)\. Use it instead\./);
+  assert.doesNotMatch(follow, /security invoker/);
+  assert.doesNotMatch(follow, /grant execute/i);
+  assert.doesNotMatch(follow, /to authenticated/i);
+
+  const mutate = readFileSync(join(root, "src/lib/board/mutate.ts"), "utf8");
+  assert.match(mutate, /rpc\("create_agent_project"/);
+  assert.match(mutate, /access_class !== "user"/);
+  assert.match(mutate, /created_by_agent_id\?\.toLowerCase\(\) !== agentId\.toLowerCase\(\)/);
+  assert.doesNotMatch(mutate, /\.ilike\(/);
+  const server = readFileSync(join(root, "src/lib/mcp/server.ts"), "utf8");
+  const tool = server.slice(server.indexOf('"create_project"'), server.indexOf('"list_tasks"'));
+  assert.match(tool, /createProject/);
+  assert.doesNotMatch(tool, /accessClass|access_class:\s*"executive"/);
+});
